@@ -13,6 +13,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Custom CSS for compact metric typography and improved visual layout
 st.markdown("""
 <style>
     div[data-testid="stMetricValue"] {
@@ -54,7 +55,7 @@ def load_and_standardize_data(uploaded_file):
         else:
             df = pd.read_excel(uploaded_file)
     else:
-        # Generar dataset sintético demostrativo si no hay archivo
+        # Generar dataset sintético demostrativo si no hay archivo subido
         np.random.seed(42)
         n_clientes = 25
         productos = ["Pasarela Pagos", "Corresponsales", "Billetera Virtual"]
@@ -135,7 +136,6 @@ df_raw = load_and_standardize_data(uploaded_file)
 
 st.sidebar.header("🎯 2. Selección Obligatoria de Producto")
 
-# Filtro Obligatorio: Se elimina 'TODOS' para obligar análisis específico por línea de negocio
 lista_productos = sorted(df_raw["producto"].unique().tolist())
 if not lista_productos:
     lista_productos = ["General"]
@@ -151,7 +151,6 @@ st.sidebar.caption("🔒 *Análisis restringido exclusivamente a:* **" + str(pro
 
 df_filtered_prod = df_raw[df_raw["producto"] == prod_seleccionado].copy()
 
-# Filtros de Año y Mes
 anios_disponibles = sorted(df_filtered_prod["año"].unique().tolist())
 col_f1, col_f2 = st.sidebar.columns(2)
 
@@ -246,7 +245,6 @@ with st.sidebar.expander("🛠️ Retención y Churn", expanded=False):
     churn_grande = st.slider("Churn Mensual Clientes Grandes (%)", 0.1, 2.5, 0.5, 0.1) / 100.0
     meses_ltv = st.slider("Horizonte de Análisis LTV (Meses)", 12, 48, 24, 6)
 
-# Funciones del modelo de bolsas cuadráticas
 def calc_bolsa_acum(b_idx, T1, Dmax, k):
     """Calcula las transacciones acumuladas alcanzadas hasta la bolsa b_idx."""
     val = (T1 * b_idx - k) + np.sqrt((T1 * b_idx - k)**2 + 4 * (1 - Dmax) * k * T1 * b_idx)
@@ -277,7 +275,6 @@ def calc_num_bolsas(vol, T1, Dmax, k):
 rev_actual_total = df_work["valor cobrado"].sum()
 target_rev_rec = rev_actual_total * Rev_target_pct
 
-# Optimización automática de P_base y T1 para Recurrente (MCLF)
 def loss_recurrente(params):
     P_base, T1 = params
     if P_base <= 0 or T1 <= 1:
@@ -332,8 +329,8 @@ df_res["ICLF_Nuevo"] = df_res["# txn"].apply(lambda v: calc_iclf_cliente(v, P_ba
 df_res["Inicial_Simulado"] = df_res["ILF_Nuevo"] + df_res["ICLF_Nuevo"]
 
 # 3. LTV Proyectado
-q33 = df_res["# txn"].quantile(0.33)
-q66 = df_res["# txn"].quantile(0.66)
+q33 = df_res["# txn"].quantile(0.33) if len(df_res) > 0 else 100
+q66 = df_res["# txn"].quantile(0.66) if len(df_res) > 0 else 1000
 
 def calc_churn(v):
     if v <= q33:
@@ -354,7 +351,7 @@ col1, col2, col3, col4, col5 = st.columns(5)
 col1.metric("Facturación Actual Evaluada", f"${rev_actual_total:,.0f} COP", help="Suma de facturación del producto seleccionado.")
 col2.metric("Facturación Modelo Nuevo", f"${rev_nueva_total:,.0f} COP", delta=f"{pct_variacion_total:+.1f}%", help="Impacto estimado mensual.")
 col3.metric("Tarifa Piso Mensual", f"${MCB_piso:,.0f} COP")
-col4.metric("% en Tarifa Piso", f"{(df_res['En_Piso_MCB'].sum()/len(df_res))*100:.1f}%")
+col4.metric("% en Tarifa Piso", f"{(df_res['En_Piso_MCB'].sum()/max(1, len(df_res)))*100:.1f}%")
 col5.metric("Setup Total Simulado", f"${df_res['Inicial_Simulado'].sum():,.0f} COP")
 
 st.markdown("---")
@@ -502,19 +499,19 @@ with tab_rec:
     st.markdown("### 📋 Tabla Escalar de Bolsas Transaccionales (Ecuación Cuadrática con Descuento)")
     st.caption("Esta tabla ilustra cómo cada bolsa adicional cuesta exactamente la misma tarifa fija, pero acomoda progresivamente mayor cantidad de transacciones.")
 
-    # Generación de la tabla de bolsas
+    # Generación de la tabla de bolsas con corrección del NameError
     bolsas_list = []
     prev_acum = 0
     for b in range(1, 11):
         acum_txns = calc_bolsa_acum(b, T1_opt, D_max, k_sens)
         txns_en_bolsa = acum_txns - prev_acum
-        costo_total = b * costo_bolsa_base
+        costo_total = b * costo_bolsa_mclf  # <--- CORREGIDO: Usando costo_bolsa_mclf correctamente
         tarifa_efectiva = costo_total / acum_txns if acum_txns > 0 else 0
         desc_pct = (1 - (tarifa_efectiva / P_base_MCLF_opt)) * 100 if P_base_MCLF_opt > 0 else 0
         
         bolsas_list.append({
             "Bolsa #": f"Bolsa {b}",
-            "Costo Fijo por Bolsa": costo_bolsa_base,
+            "Costo Fijo por Bolsa": costo_bolsa_mclf,
             "Costo Acumulado Total": costo_total,
             "Capacidad Txn Acumulada": int(round(acum_txns)),
             "Txns Adicionales en esta Bolsa": int(round(txns_en_bolsa)),
@@ -538,33 +535,59 @@ with tab_rec:
 
 with tab_init:
     st.subheader("🚀 Cobro Único de Entrada ($ILF + ICLF$) - Simulación de Onboarding")
-    
-    col_i1, col_i2 = st.columns([2, 1])
+    st.info("""
+    💡 **¿Qué representa este análisis?**
+    Esta pestaña evalúa **únicamente la tarifa fija de entrada/onboarding** ($ILF + ICLF$) como si cada cliente de la cartera actual fuera a ingresar hoy como un cliente nuevo. 
+    **Nota:** Es un cobro único de una sola vez, por lo que no depende del tiempo ni se repite mensualmente.
+    """)
+
+    # Consolidar clientes únicos para eliminar duplicados temporales en la vista del Setup Inicial
+    df_init_unique = df_res.groupby("cliente").agg(
+        txns_media=("# txn", "mean"),
+        ILF_Nuevo=("ILF_Nuevo", "first"),
+        ICLF_Nuevo=("ICLF_Nuevo", "mean"),
+        Inicial_Simulado=("Inicial_Simulado", "mean")
+    ).reset_index().sort_values("txns_media", ascending=True)
+
+    col_i1, col_i2 = st.columns([1.8, 1.2])
     
     with col_i1:
         fig_init = go.Figure()
         fig_init.add_trace(go.Bar(
-            x=df_res["cliente"], y=df_res["ILF_Nuevo"],
+            x=df_init_unique["cliente"], y=df_init_unique["ILF_Nuevo"],
             name="ILF (Licencia Base Fija)", marker_color="darkslategrey"
         ))
         fig_init.add_trace(go.Bar(
-            x=df_res["cliente"], y=df_res["ICLF_Nuevo"],
+            x=df_init_unique["cliente"], y=df_init_unique["ICLF_Nuevo"],
             name="ICLF (Capacidad de Setup)", marker_color="sandybrown"
         ))
         fig_init.update_layout(
             barmode='stack',
-            title=f"Estructura del Cobro Inicial Simulado por Cliente ({prod_seleccionado})",
-            xaxis_title="Clientes",
+            title=f"Estructura del Fee Único de Entrada por Cliente ({prod_seleccionado})",
+            xaxis_title="Clientes (Ordenados por Escala de Volumen)",
             yaxis_title="Cobro Inicial ($ COP)",
             height=430
         )
         st.plotly_chart(fig_init, use_container_width=True)
         
     with col_i2:
-        st.markdown("#### 📋 Métricas del Setup Proyectado")
-        st.metric("Setup Promedio por Cliente", f"${df_res['Inicial_Simulado'].mean():,.0f} COP")
-        st.metric("Setup Mínimo", f"${df_res['Inicial_Simulado'].min():,.0f} COP")
-        st.metric("Setup Máximo", f"${df_res['Inicial_Simulado'].max():,.0f} COP")
+        st.markdown("#### 📈 Curva de Escalabilidad del Setup Inicial")
+        fig_setup_scatter = px.scatter(
+            df_init_unique, x="txns_media", y="Inicial_Simulado",
+            text="cliente", hover_name="cliente",
+            labels={"txns_media": "Volumen Transaccional Promedio (# txn)", "Inicial_Simulado": "Cobro Inicial Total ($ COP)"},
+            title="Escalado del Setup Inicial vs Volumen",
+            color_discrete_sequence=['coral']
+        )
+        fig_setup_scatter.update_traces(marker=dict(size=10))
+        fig_setup_scatter.update_layout(height=320, xaxis_type="log")
+        st.plotly_chart(fig_setup_scatter, use_container_width=True)
+
+        st.markdown("#### 📋 Métricas Clave del Setup Proyectado")
+        c_s1, c_s2, c_s3 = st.columns(3)
+        c_s1.metric("Setup Promedio", f"${df_init_unique['Inicial_Simulado'].mean():,.0f} COP")
+        c_s2.metric("Setup Mínimo", f"${df_init_unique['Inicial_Simulado'].min():,.0f} COP")
+        c_s3.metric("Setup Máximo", f"${df_init_unique['Inicial_Simulado'].max():,.0f} COP")
 
 with tab_ltv:
     st.subheader("💎 Valor del Cliente en el Tiempo (LTV Proyectado)")
@@ -690,7 +713,7 @@ with tab_data:
         }),
         use_container_width=True
     )
-    
+
     csv_buffer = io.StringIO()
     df_styled.to_csv(csv_buffer, index=False)
     st.download_button(
