@@ -263,10 +263,21 @@ def calc_mclf_cliente(vol, P_base, T1, Dmax, k):
         acum = calc_bolsa_acum(b, T1, Dmax, k)
     return b * (P_base * T1)
 
+def calc_num_bolsas(vol, T1, Dmax, k):
+    """Calcula el número exacto de bolsas necesarias y la capacidad total alcanzada."""
+    if vol <= 0:
+        return 0, 0.0
+    b = 1
+    acum = calc_bolsa_acum(b, T1, Dmax, k)
+    while acum < vol and b < 200:
+        b += 1
+        acum = calc_bolsa_acum(b, T1, Dmax, k)
+    return b, acum
+
 rev_actual_total = df_work["valor cobrado"].sum()
 target_rev_rec = rev_actual_total * Rev_target_pct
 
-# Optimización automática de P_base y T1
+# Optimización automática de P_base y T1 para Recurrente (MCLF)
 def loss_recurrente(params):
     P_base, T1 = params
     if P_base <= 0 or T1 <= 1:
@@ -287,16 +298,27 @@ def loss_recurrente(params):
 res_rec = opt.minimize(loss_recurrente, x0=[500.0, 1000.0], method='Nelder-Mead')
 P_base_MCLF_opt = max(10.0, res_rec.x[0])
 T1_opt = max(10.0, res_rec.x[1])
-costo_bolsa_base = P_base_MCLF_opt * T1_opt
+costo_bolsa_mclf = P_base_MCLF_opt * T1_opt
 
 vol_max = max(1, df_work["# txn"].max())
 ICLF_target_small = max(0, target_setup_pequeño - ILF_base_param)
 ICLF_target_large = max(0, target_setup_grande - ILF_base_param)
-P_base_ICLF_opt = ICLF_target_large / vol_max
+
+# Cálculo del modelo de bolsas de Capacidad Inicial (ICLF)
+b_max_iclf, _ = calc_num_bolsas(vol_max, T1_opt, D_max, k_sens)
+costo_bolsa_ICLF_opt = ICLF_target_large / max(1, b_max_iclf)
+P_base_ICLF_opt = costo_bolsa_ICLF_opt / T1_opt if T1_opt > 0 else 0.0
+
+def calc_iclf_cliente(vol, P_base_iclf, T1, Dmax, k):
+    """Calcula el cobro por bolsas de capacidad inicial (ICLF)."""
+    if vol <= 0:
+        return 0.0
+    b, _ = calc_num_bolsas(vol, T1, Dmax, k)
+    return max(ICLF_target_small, b * (P_base_iclf * T1))
 
 df_res = df_work.copy()
 
-# 1. Calculo Recurrente Nuevo
+# 1. Calculo Recurrente Nuevo (MCLF)
 df_res["MCLF_Nuevo"] = df_res["# txn"].apply(lambda v: calc_mclf_cliente(v, P_base_MCLF_opt, T1_opt, D_max, k_sens))
 df_res["MLF_PSF"] = ILF_base_param * (pct_MLF + pct_PSF)
 df_res["Recurrente_Nuevo"] = np.maximum(MCB_piso, df_res["MCLF_Nuevo"] + df_res["MLF_PSF"])
@@ -304,9 +326,9 @@ df_res["Diff_Recurrente"] = df_res["Recurrente_Nuevo"] - df_res["valor cobrado"]
 df_res["Var_Pct_Recurrente"] = (df_res["Diff_Recurrente"] / np.maximum(1.0, df_res["valor cobrado"])) * 100.0
 df_res["En_Piso_MCB"] = df_res["Recurrente_Nuevo"] == MCB_piso
 
-# 2. Inicial Simulado
+# 2. Inicial Simulado por Bolsas (ICLF)
 df_res["ILF_Nuevo"] = ILF_base_param
-df_res["ICLF_Nuevo"] = df_res["# txn"].apply(lambda v: max(ICLF_target_small, v * P_base_ICLF_opt))
+df_res["ICLF_Nuevo"] = df_res["# txn"].apply(lambda v: calc_iclf_cliente(v, P_base_ICLF_opt, T1_opt, D_max, k_sens))
 df_res["Inicial_Simulado"] = df_res["ILF_Nuevo"] + df_res["ICLF_Nuevo"]
 
 # 3. LTV Proyectado
@@ -356,20 +378,21 @@ with tab_exec:
     col_e1, col_e2 = st.columns([1.1, 0.9])
     
     with col_e1:
-        st.markdown("### 🔍 Claridad de los Parámetros Optimizados")
+        st.markdown("### 🔍 Estructura de Precios por Bolsas Optimizada")
         st.markdown(f"""
-        #### 🔄 Modelo Recurrente Mensual ($MCLF + MCB$)
-        * **Tarifa Base por Transacción ($P_{{base, MCLF}}$):** `${P_base_MCLF_opt:,.2f} COP/txn` *(Precio de referencia por transacción individual)*.
-        * **Capacidad de la Bolsa 1 ($T_1$):** `{T1_opt:,.0f} transacciones`.
-        * **Precio Fijo por Bolsa Recurrente ($P_{{base}} \\times T_1$):** **`${costo_bolsa_base:,.0f} COP`**.
+        #### 🔄 1. Modelo Recurrente Mensual ($MCLF + MCB$)
+        * **Tarifa Base Recurrente ($P_{{base, MCLF}}$):** `${P_base_MCLF_opt:,.2f} COP/txn`
+        * **Capacidad Base de Bolsa ($T_1$):** `{T1_opt:,.0f} transacciones`
+        * **Precio Fijo por Bolsa Recurrente:** **`${costo_bolsa_mclf:,.0f} COP`**
 
-        #### 🚀 Modelo Inicial / Setup ($ILF + ICLF$)
-        * **Licencia Base Fija ($ILF_{{\\text{{base}}}}$):** **`${ILF_base_param:,.0f} COP`** *(Puesta en marcha fija)*.
-        * **Tarifa Base de Setup ($P_{{base, ICLF}}$):** `${P_base_ICLF_opt:,.2f} COP/txn` *(Capacidad de integración)*.
-        * **Cobro Setup Total Simulado:** Entre `${ILF_base_param + ICLF_target_small:,.0f} COP` y `${ILF_base_param + ICLF_target_large:,.0f} COP` según escala del cliente.
-        
-        👉 **Mecánica del Modelo Recurrente:**  
-        Cada bolsa recurrente adquirida vale exactamente **`${costo_bolsa_base:,.0f} COP`**. Sin embargo, gracias al descuento cuadrático ($D={D_max:.0%}$), la **Bolsa 1** incluye **{calc_bolsa_acum(1, T1_opt, D_max, k_sens):,.0f} txns**, la **Bolsa 2** acumula **{calc_bolsa_acum(2, T1_opt, D_max, k_sens):,.0f} txns**, y así sucesivamente, haciendo más económica cada transacción adicional.
+        #### 🚀 2. Modelo Inicial / Setup ($ILF + ICLF$)
+        * **Licencia Base Fija ($ILF_{{\\text{{base}}}}$):** **`${ILF_base_param:,.0f} COP`** *(Puesta en marcha)*
+        * **Tarifa Base Inicial ($P_{{base, ICLF}}$):** `${P_base_ICLF_opt:,.2f} COP/txn`
+        * **Precio Fijo por Bolsa de Capacidad Inicial ($ICLF$):** **`${costo_bolsa_ICLF_opt:,.0f} COP`**
+        * **Cobro Setup Total Simulado:** Entre `${ILF_base_param + ICLF_target_small:,.0f} COP` y `${ILF_base_param + ICLF_target_large:,.0f} COP` según escala de bolsas.
+
+        👉 **Mecánica del Modelo de Bolsas:**  
+        Tanto en el cobro recurrente ($MCLF$) como en el inicial ($ICLF$), la capacidad se vende en **bolsas fijas**. Cada bolsa recurrente cuesta **`${costo_bolsa_mclf:,.0f} COP`** y cada bolsa inicial cuesta **`${costo_bolsa_ICLF_opt:,.0f} COP`**. El número de transacciones contenidas dentro de cada bolsa subsecuente crece progresivamente gracias al descuento cuadrático ($D={D_max:.0%}$).
         """)
         
         if diff_total < 0:
@@ -569,16 +592,13 @@ with tab_data:
     col_c5.metric("Setup Inicial Simulado", f"${row_c['Inicial_Simulado']:,.0f} COP")
     
     st.markdown("---")
-    st.markdown(f"### 📦 Desglose Tarifario Detallado para **{row_c['cliente']}**")
+    st.markdown(f"### 📦 Desglose Tarifario Detallado de Bolsas para **{row_c['cliente']}**")
     
     vol_c = row_c["# txn"]
     
-    # Determinar cantidad exacta de bolsas para el volumen de este cliente
-    b_c = 1
-    acum_c = calc_bolsa_acum(b_c, T1_opt, D_max, k_sens)
-    while acum_c < vol_c and b_c < 200:
-        b_c += 1
-        acum_c = calc_bolsa_acum(b_c, T1_opt, D_max, k_sens)
+    # Calcular bolsas requeridas para el cliente tanto en MCLF como en ICLF
+    b_c_mclf, acum_c_mclf = calc_num_bolsas(vol_c, T1_opt, D_max, k_sens)
+    b_c_iclf, acum_c_iclf = calc_num_bolsas(vol_c, T1_opt, D_max, k_sens)
         
     mclf_c = row_c["MCLF_Nuevo"]
     ilf_c = row_c["ILF_Nuevo"]
@@ -589,20 +609,22 @@ with tab_data:
     col_detail1, col_detail2 = st.columns(2)
     
     with col_detail1:
-        st.markdown("#### 🔄 Resumen Recurrente ($MCLF + MCB$)")
+        st.markdown("#### 🔄 Bolsas Recurrentes Mensuales ($MCLF + MCB$)")
         st.markdown(f"""
-        * **Bolsas Recurrentes Requeridas:** `{b_c} bolsa(s)` (Capacidad total alcanzada: {acum_c:,.0f} txns)
-        * **Precio Fijo por Bolsa:** `${costo_bolsa_base:,.0f} COP`
-        * **Subtotal Bolsas ($MCLF$):** `${mclf_c:,.0f} COP`
+        * **Bolsas Recurrentes Requeridas:** `{b_c_mclf} bolsa(s)` (Capacidad total: {acum_c_mclf:,.0f} txns)
+        * **Precio Fijo por Bolsa Recurrente:** `${costo_bolsa_mclf:,.0f} COP` (${P_base_MCLF_opt:,.2f}/txn)
+        * **Subtotal Bolsas Recurrentes ($MCLF$):** `${mclf_c:,.0f} COP`
         * **Mantenimiento & Soporte ($MLF+PSF$):** `${row_c['MLF_PSF']:,.0f} COP`
         * **Cobro Recurrente Total Aplicado:** **`${rec_tot_c:,.0f} COP`** `{"(Aplica Tarifa Mínima MCB)" if row_c["En_Piso_MCB"] else ""}`
         """)
         
     with col_detail2:
-        st.markdown("#### 🚀 Resumen Setup Inicial ($ILF + ICLF$)")
+        st.markdown("#### 🚀 Bolsas de Capacidad Inicial ($ILF + ICLF$)")
         st.markdown(f"""
+        * **Bolsas Iniciales Requeridas:** `{b_c_iclf} bolsa(s)` (Capacidad total: {acum_c_iclf:,.0f} txns)
+        * **Precio Fijo por Bolsa Inicial ($ICLF$):** `${costo_bolsa_ICLF_opt:,.0f} COP` (${P_base_ICLF_opt:,.2f}/txn)
+        * **Subtotal Capacidad Inicial ($ICLF$):** `${iclf_c:,.0f} COP`
         * **Licencia Base Fija ($ILF$):** `${ilf_c:,.0f} COP`
-        * **Capacidad Inicial ($ICLF$):** `${iclf_c:,.0f} COP` *(Calculado a ${P_base_ICLF_opt:,.2f} COP/txn)*
         * **Cobro Único de Entrada Total:** **`${setup_tot_c:,.0f} COP`**
         * **LTV Proyectado a {meses_ltv} Meses:** `${row_c['LTV_Proyectado']:,.0f} COP`
         """)
@@ -611,21 +633,24 @@ with tab_data:
     
     client_bolsas_list = []
     prev_a = 0
-    for b in range(1, b_c + 1):
+    for b in range(1, b_c_mclf + 1):
         acum_t = calc_bolsa_acum(b, T1_opt, D_max, k_sens)
         txns_b = acum_t - prev_a
-        c_total = b * costo_bolsa_base
-        tar_ef = c_total / acum_t if acum_t > 0 else 0
-        desc_p = (1 - (tar_ef / P_base_MCLF_opt)) * 100 if P_base_MCLF_opt > 0 else 0
-        es_bolsa_final = (b == b_c)
+        c_mclf_total = b * costo_bolsa_mclf
+        c_iclf_total = b * costo_bolsa_ICLF_opt
+        tar_ef_mclf = c_mclf_total / acum_t if acum_t > 0 else 0
+        desc_p = (1 - (tar_ef_mclf / P_base_MCLF_opt)) * 100 if P_base_MCLF_opt > 0 else 0
+        es_bolsa_final = (b == b_c_mclf)
         
         client_bolsas_list.append({
-            "Bolsa #": f"Bolsa {b}" + (" (Última requerida)" if es_bolsa_final else ""),
-            "Costo Fijo por Bolsa": costo_bolsa_base,
-            "Costo Acumulado MCLF": c_total,
+            "Bolsa #": f"Bolsa {b}" + (" (Capacidad Alcanzada)" if es_bolsa_final else ""),
             "Capacidad Txn Acumulada": int(round(acum_t)),
             "Txns Adicionales en Bolsa": int(round(txns_b)),
-            "Tarifa Promedio ($/txn)": tar_ef,
+            "Costo Bolsa Recurrente (MCLF)": costo_bolsa_mclf,
+            "Costo Acumulado MCLF": c_mclf_total,
+            "Costo Bolsa Inicial (ICLF)": costo_bolsa_ICLF_opt,
+            "Costo Acumulado ICLF": c_iclf_total,
+            "Tarifa Recurrente Promedio ($/txn)": tar_ef_mclf,
             "Descuento Efectivo (%)": max(0.0, desc_p)
         })
         prev_a = acum_t
@@ -633,11 +658,13 @@ with tab_data:
     df_client_bolsas = pd.DataFrame(client_bolsas_list)
     st.dataframe(
         df_client_bolsas.style.format({
-            "Costo Fijo por Bolsa": "${:,.0f} COP",
-            "Costo Acumulado MCLF": "${:,.0f} COP",
             "Capacidad Txn Acumulada": "{:,}",
             "Txns Adicionales en Bolsa": "{:,}",
-            "Tarifa Promedio ($/txn)": "${:,.2f} COP",
+            "Costo Bolsa Recurrente (MCLF)": "${:,.0f} COP",
+            "Costo Acumulado MCLF": "${:,.0f} COP",
+            "Costo Bolsa Inicial (ICLF)": "${:,.0f} COP",
+            "Costo Acumulado ICLF": "${:,.0f} COP",
+            "Tarifa Recurrente Promedio ($/txn)": "${:,.2f} COP",
             "Descuento Efectivo (%)": "{:.1f}%"
         }),
         use_container_width=True
