@@ -99,42 +99,6 @@ uploaded_file = st.sidebar.file_uploader(
     help="El archivo puede contener las columnas: 'cliente', 'producto', '# txn' y 'valor cobrado'."
 )
 
-    # Mapeo flexible de columnas para evitar errores de tipografía
-    col_map = {}
-    for col in df.columns:
-        c_clean = str(col).strip().lower()
-        if "prod" in c_clean:
-            col_map[col] = "producto"
-        elif "txn" in c_clean or "transacc" in c_clean or "vol" in c_clean:
-            col_map[col] = "# txn"
-        elif "valor" in c_clean or "cobrad" in c_clean or "factur" in c_clean or "rec" in c_clean:
-            col_map[col] = "valor cobrado"
-
-    df = df.rename(columns=col_map)
-    
-    if "producto" not in df.columns:
-        df["producto"] = "General"
-    if "# txn" not in df.columns:
-        df["# txn"] = 1000
-    if "valor cobrado" not in df.columns:
-        df["valor cobrado"] = 1500000.0
-        
-    df["# txn"] = pd.to_numeric(df["# txn"], errors='coerce').fillna(1).astype(int)
-    df["valor cobrado"] = pd.to_numeric(df["valor cobrado"], errors='coerce').fillna(0.0)
-    
-    # Asignar identificador único de cliente si no viene en el archivo
-    if "ID_Cliente" not in df.columns:
-        df["ID_Cliente"] = [f"Cliente_{i+1:02d}" for i in range(len(df))]
-        
-    return df
-
-st.sidebar.header("📁 1. Carga de Datos")
-uploaded_file = st.sidebar.file_uploader(
-    "Subir archivo (`producto_volumen_facturado.xlsx` / CSV)",
-    type=["xlsx", "csv"],
-    help="El archivo debe tener las columnas: 'producto', '# txn', y 'valor cobrado'."
-)
-
 df_raw = load_and_standardize_data(uploaded_file)
 
 st.sidebar.header("🎯 2. Filtro de Análisis")
