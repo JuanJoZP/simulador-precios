@@ -7,58 +7,83 @@ import plotly.express as px
 import io
 
 st.set_page_config(
-    page_title="Modelador Tarifario PTESA - Evaluador de Impacto",
+    page_title="Modelador Tarifario PTESA - Evaluador por Producto",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("⚡ Modelador Tarifario Integrado (Recurrente e Inicial)")
+st.markdown("""
+<style>
+    div[data-testid="stMetricValue"] {
+        font-size: 1.15rem !important;
+        font-weight: 600 !important;
+        white-space: nowrap !important;
+    }
+    div[data-testid="stMetricLabel"] {
+        font-size: 0.82rem !important;
+    }
+    div[data-testid="stMetricDelta"] {
+        font-size: 0.80rem !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+st.title("⚡ Modelador Tarifario Integrado (Análisis por Producto)")
 
 st.markdown("""
-Esta herramienta permite **simular y evaluar el impacto del nuevo esquema tarifario** sobre la cartera de clientes actual.
-Está diseñada para proyectar ingresos, ajustar parámetros de cobro en tiempo real y comparar los valores cobrados hoy contra la propuesta tarifaria.
+Esta herramienta evalúa el impacto financiero del **nuevo esquema tarifario por bolsas transaccionales** sobre la cartera de clientes.
+Para garantizar la consistencia en los volúmenes y la estructura de costos, **el análisis se realiza obligatoriamente producto por producto**.
 """)
 
-with st.expander("📖 **¿Cómo funciona este modelador y qué significa cada concepto? (Haz clic para expandir)**", expanded=False):
+with st.expander("📖 **¿Cómo funciona la lectura de datos y el modelo de bolsas? (Haz clic para expandir)**", expanded=False):
     st.markdown("""
-    ### 🎯 Objetivos de la herramienta:
-    1. **Evaluar el Cobro Recurrente (Mensual):** Compara lo que le cobras hoy a cada cliente (`valor cobrado`) contra lo que pagaría en el nuevo esquema basado en bolsas transaccionales ($MCLF$) + piso mínimo garantizado ($MCB$).
-    2. **Simular el Cobro Inicial (Setup / Entradas):** Calcula el valor de entrada ($ILF + ICLF$) que le correspondería pagar a tu cartera actual si fueran contratados hoy como clientes nuevos con su volumen actual.
-
-    ---
-    ### 💡 Conceptos Clave en Lenguaje Comercial:
-    * **Cobro Recurrente Mensual:** Lo que el cliente paga cada mes. Se compone de:
-      * **Bolsa Transaccional ($MCLF$):** Paquetes de volumen transaccional ($T_1$) con descuento progresivo por escala.
-      * **Soporte y Mantenimiento ($MLF + PSF$):** Porcentaje mensual derivado de la licencia base.
-      * **Piso Mínimo Mensual ($MCB_{\\text{piso}}$):** Tarifa mínima obligatoria. Si la suma del consumo del cliente no alcanza este valor, el cliente paga la tarifa piso.
-    * **Cobro Inicial / Setup (Pago Único al Entrar):**
-      * **Licencia Base ($ILF_{\\text{base}}$):** Derecho de uso base y puesta en marcha inicial (monto fijo).
-      * **Cargo por Capacidad ($ICLF$):** Cobro proporcional a la capacidad operativa/volumen estimado con el que inicia el cliente.
+    ### 🎯 Conceptos Clave del Esquema de Precios:
+    1. **Tarifa Base Unitario ($P_{\\text{base}}$):** Precio inicial por transacción individual en la primera bolsa.
+    2. **Tamaño Base de Bolsa ($T_1$):** Número de transacciones contenidas en la primera bolsa.
+    3. **Valor Fijo por Bolsa:** Cada bolsa adicional cuesta exactamente $P_{\\text{base}} \\times T_1$ COP.
+    4. **Ecuación Cuadrática con Descuento ($D_{\\max}, k$):** Aunque el costo por bolsa es constante, la cantidad de transacciones *dentro* de cada bolsa subsecuente aumenta progresivamente. Esto reduce automáticamente el precio promedio por transacción a mayor volumen.
+    5. **Estructura Multitemporal:** Si tu archivo incluye columnas de `año` y `mes`, puedes analizar periodos específicos o utilizar el promedio mensual consolidado por cliente.
     """)
 
 def load_and_standardize_data(uploaded_file):
-    """Carga y estandariza los datos de Excel/CSV a columnas homogéneas."""
+    """Carga y estandariza los datos de Excel/CSV a columnas homogéneas con Año y Mes."""
     if uploaded_file is not None:
         if uploaded_file.name.endswith('.csv'):
             df = pd.read_csv(uploaded_file)
         else:
             df = pd.read_excel(uploaded_file)
     else:
-        # Generar dataset sintético demostrativo si no hay archivo subido
+        # Generar dataset sintético demostrativo si no hay archivo
         np.random.seed(42)
-        n = 45
-        productos = np.random.choice(["Pasarela Pagos", "Corresponsales", "Billetera Virtual"], size=n)
-        txns = np.random.lognormal(mean=7.5, sigma=1.2, size=n).astype(int) + 100
-        valores = txns * np.random.uniform(1200, 2400, size=n) + 800000
-        df = pd.DataFrame({
-            "cliente": [f"Empresa Alpha {i+1:02d}" for i in range(n)],
-            "producto": productos,
-            "# txn": txns,
-            "valor cobrado": valores
-        })
+        n_clientes = 25
+        productos = ["Pasarela Pagos", "Corresponsales", "Billetera Virtual"]
+        anios = [2024]
+        meses = list(range(1, 7))
+        
+        rows = []
+        for c_idx in range(n_clientes):
+            prod = np.random.choice(productos)
+            base_txns = np.random.randint(400, 15000)
+            base_val = base_txns * np.random.uniform(120, 250) + 900000
+            cliente_nombre = f"Empresa Alpha {c_idx+1:02d}"
+            
+            for anio in anios:
+                for mes in meses:
+                    noise = np.random.uniform(0.88, 1.12)
+                    txns = max(10, int(base_txns * noise))
+                    val = base_val * noise
+                    rows.append({
+                        "cliente": cliente_nombre,
+                        "producto": prod,
+                        "año": anio,
+                        "mes": mes,
+                        "# txn": txns,
+                        "valor cobrado": val
+                    })
+        df = pd.DataFrame(rows)
 
-    # Mapeo flexible de columnas para evitar errores de tipografía
+    # Mapeo flexible de columnas
     col_map = {}
     for col in df.columns:
         c_clean = str(col).strip().lower()
@@ -66,6 +91,10 @@ def load_and_standardize_data(uploaded_file):
             col_map[col] = "cliente"
         elif "prod" in c_clean:
             col_map[col] = "producto"
+        elif "año" in c_clean or "year" in c_clean or "anio" in c_clean or "aňo" in c_clean:
+            col_map[col] = "año"
+        elif "mes" in c_clean or "month" in c_clean or "perio" in c_clean:
+            col_map[col] = "mes"
         elif "txn" in c_clean or "transacc" in c_clean or "vol" in c_clean:
             col_map[col] = "# txn"
         elif "valor" in c_clean or "cobrad" in c_clean or "factur" in c_clean or "rec" in c_clean:
@@ -74,72 +103,119 @@ def load_and_standardize_data(uploaded_file):
     df = df.rename(columns=col_map)
     
     if "cliente" not in df.columns:
-        if "ID_Cliente" in df.columns:
-            df["cliente"] = df["ID_Cliente"]
-        else:
-            df["cliente"] = [f"Cliente {i+1:02d}" for i in range(len(df))]
-            
+        df["cliente"] = [f"Cliente {i+1:02d}" for i in range(len(df))]
     if "producto" not in df.columns:
         df["producto"] = "General"
+    if "año" not in df.columns:
+        df["año"] = 2024
+    if "mes" not in df.columns:
+        df["mes"] = 1
     if "# txn" not in df.columns:
         df["# txn"] = 1000
     if "valor cobrado" not in df.columns:
         df["valor cobrado"] = 1500000.0
         
+    df["año"] = pd.to_numeric(df["año"], errors='coerce').fillna(2024).astype(int)
+    df["mes"] = pd.to_numeric(df["mes"], errors='coerce').fillna(1).astype(int)
     df["# txn"] = pd.to_numeric(df["# txn"], errors='coerce').fillna(1).astype(int)
     df["valor cobrado"] = pd.to_numeric(df["valor cobrado"], errors='coerce').fillna(0.0)
     df["cliente"] = df["cliente"].astype(str)
+    df["producto"] = df["producto"].astype(str)
         
     return df
 
 st.sidebar.header("📁 1. Carga de Datos")
 uploaded_file = st.sidebar.file_uploader(
-    "Subir archivo (`producto_volumen_facturado.xlsx` / CSV)",
+    "Subir archivo (`datos_facturacion.xlsx` / CSV)",
     type=["xlsx", "csv"],
-    help="El archivo puede contener las columnas: 'cliente', 'producto', '# txn' y 'valor cobrado'."
+    help="Debe incluir columnas como 'cliente', 'producto', '# txn', 'valor cobrado' y opcionalmente 'año' y 'mes'."
 )
 
 df_raw = load_and_standardize_data(uploaded_file)
 
-st.sidebar.header("🎯 2. Filtro de Análisis")
-lista_productos = ["TODOS LOS PRODUCTOS"] + sorted(df_raw["producto"].unique().tolist())
+st.sidebar.header("🎯 2. Selección Obligatoria de Producto")
+
+# Filtro Obligatorio: Se elimina 'TODOS' para obligar análisis específico por línea de negocio
+lista_productos = sorted(df_raw["producto"].unique().tolist())
+if not lista_productos:
+    lista_productos = ["General"]
+
 prod_seleccionado = st.sidebar.selectbox(
-    "Filtrar por Línea de Producto",
+    "Línea de Producto a Evaluar",
     lista_productos,
-    help="Evalúa el comportamiento tarifario de toda la empresa o concéntrate en una línea específica."
+    index=0,
+    help="El análisis se realiza de forma independiente por producto para mantener coherencia en las tarifas por bolsa."
 )
 
-if prod_seleccionado != "TODOS LOS PRODUCTOS":
-    df_work = df_raw[df_raw["producto"] == prod_seleccionado].copy().reset_index(drop=True)
-else:
-    df_work = df_raw.copy().reset_index(drop=True)
+st.sidebar.caption("🔒 *Análisis restringido exclusivamente a:* **" + str(prod_seleccionado) + "**")
+
+df_filtered_prod = df_raw[df_raw["producto"] == prod_seleccionado].copy()
+
+# Filtros de Año y Mes
+anios_disponibles = sorted(df_filtered_prod["año"].unique().tolist())
+col_f1, col_f2 = st.sidebar.columns(2)
+
+with col_f1:
+    anio_sel = st.selectbox("Año", ["TODOS"] + [str(a) for a in anios_disponibles])
+with col_f2:
+    if anio_sel != "TODOS":
+        meses_disponibles = sorted(df_filtered_prod[df_filtered_prod["año"] == int(anio_sel)]["mes"].unique().tolist())
+    else:
+        meses_disponibles = sorted(df_filtered_prod["mes"].unique().tolist())
+    mes_sel = st.selectbox("Mes", ["TODOS"] + [str(m) for m in meses_disponibles])
+
+# Aplicar filtrado temporal
+df_filtered_time = df_filtered_prod.copy()
+if anio_sel != "TODOS":
+    df_filtered_time = df_filtered_time[df_filtered_time["año"] == int(anio_sel)]
+if mes_sel != "TODOS":
+    df_filtered_time = df_filtered_time[df_filtered_time["mes"] == int(mes_sel)]
 
 st.sidebar.markdown("---")
+eval_mode = st.sidebar.radio(
+    "Modo de Evaluación Recurrente",
+    ["Promedio Mensual por Cliente", "Detalle Registros Filtrados"],
+    help="'Promedio Mensual por Cliente' es el modo recomendado para consolidar el histórico de cada empresa a una tarifa mensual representativa."
+)
+
+if eval_mode == "Promedio Mensual por Cliente":
+    df_work = df_filtered_time.groupby(["cliente", "producto"]).agg(
+        num_meses_historial=("mes", "nunique"),
+        txns_mean=("# txn", "mean"),
+        valor_cobrado=("valor cobrado", "mean"),
+        año=("año", "max"),
+        mes=("mes", "max")
+    ).reset_index()
+    df_work["# txn"] = df_work["txns_mean"].astype(int)
+    df_work["valor cobrado"] = df_work["valor_cobrado"]
+else:
+    df_work = df_filtered_time.copy().reset_index(drop=True)
+
 st.sidebar.header("⚙️ 3. Ajuste del Modelo Recurrente")
 
 with st.sidebar.expander("🛠️ Parámetros Recurrentes ($MCLF + MCB$)", expanded=True):
     Rev_target_pct = st.slider(
         "Meta de Recaudo vs Actual (%)",
         80, 150, 100, 5,
-        help="Define qué porcentaje de la facturación actual esperas recuperar o incrementar con el nuevo modelo."
+        help="Porcentaje de la facturación actual que se desea proyectar o recuperar."
     ) / 100.0
 
     MCB_piso = st.number_input(
-        "Cobro Mínimo Mensual ($MCB_{\\text{piso}}$ COP)",
+        "Cobro Mínimo Mensual Garantizado ($MCB_{\\text{piso}}$ COP)",
         value=1000000, step=100000,
-        help="Tarifa mínima garantizada por cliente. Si el consumo calculado es menor a este piso, se cobra este valor."
+        help="Tarifa mínima que pagará cualquier cliente independientemente de si transacciona o no."
     )
 
     D_max = st.slider(
         "Descuento Máximo por Volumen ($D_{\\max}$)",
         0.05, 0.50, 0.30, 0.05,
-        help="Porcentaje máximo de descuento progresivo que pueden alcanzar las bolsas de mayor escala."
+        help="Porcentaje máximo de descuento progresivo en volumen."
     )
 
     k_sens = st.slider(
         "Curvatura de Descuento ($k$)",
         100, 3000, 500, 100,
-        help="Controla qué tan rápido se otorga el descuento a medida que aumentan las bolsas de volumen."
+        help="Controla la velocidad con la que se otorgan las bolsas con mayor capacidad."
     )
 
 st.sidebar.header("🚀 4. Ajuste del Modelo Inicial (Setup)")
@@ -147,36 +223,37 @@ with st.sidebar.expander("🛠️ Parámetros de Entrada ($ILF + ICLF$)", expand
     ILF_base_param = st.number_input(
         "Licencia Base Fija ($ILF_{\\text{base}}$ COP)",
         value=2500000, step=500000,
-        help="Cobro fijo inicial para cualquier cliente por concepto de onboarding y setup básico."
+        help="Cobro único inicial fijo por onboarding y puesta en marcha."
     )
     
     target_setup_pequeño = st.number_input(
         "Setup Target Cliente Pequeño ($ COP)",
         value=4500000, step=500000,
-        help="Meta comercial de cobro inicial para clientes en el rango mínimo de volumen."
+        help="Meta comercial de cobro inicial para clientes de menor tamaño."
     )
     
     target_setup_grande = st.number_input(
         "Setup Target Cliente Grande ($ COP)",
         value=30000000, step=1000000,
-        help="Meta comercial de cobro inicial proyectado para clientes con el volumen más alto registrado."
+        help="Meta comercial de cobro inicial para clientes corporativos."
     )
 
 st.sidebar.header("📊 5. Retención y LTV")
 with st.sidebar.expander("🛠️ Retención y Churn", expanded=False):
-    pct_MLF = st.slider("% Mantenimiento ($MLF$)", 1.0, 10.0, 3.0, 0.5, help="Mantenimiento mensual derivado de la licencia base.") / 100.0
-    pct_PSF = st.slider("% Soporte ($PSF$)", 5.0, 30.0, 15.0, 1.0, help="Soporte mensual derivado de la licencia base.") / 100.0
-    churn_pequeño = st.slider("Churn Mensual Clientes Pequeños (%)", 0.5, 6.0, 2.5, 0.1, help="Tasa mensual estimada de cancelación para menor volumen.") / 100.0
-    churn_grande = st.slider("Churn Mensual Clientes Grandes (%)", 0.1, 2.5, 0.5, 0.1, help="Tasa mensual estimada de cancelación para corporativos.") / 100.0
-    meses_ltv = st.slider("Horizonte de Análisis LTV (Meses)", 12, 48, 24, 6, help="Meses proyectados para evaluar el valor del cliente en el tiempo.")
+    pct_MLF = st.slider("% Mantenimiento ($MLF$)", 1.0, 10.0, 3.0, 0.5) / 100.0
+    pct_PSF = st.slider("% Soporte ($PSF$)", 5.0, 30.0, 15.0, 1.0) / 100.0
+    churn_pequeño = st.slider("Churn Mensual Clientes Pequeños (%)", 0.5, 6.0, 2.5, 0.1) / 100.0
+    churn_grande = st.slider("Churn Mensual Clientes Grandes (%)", 0.1, 2.5, 0.5, 0.1) / 100.0
+    meses_ltv = st.slider("Horizonte de Análisis LTV (Meses)", 12, 48, 24, 6)
 
+# Funciones del modelo de bolsas cuadráticas
 def calc_bolsa_acum(b_idx, T1, Dmax, k):
-    """Calcula las transacciones acumuladas requeridas para alcanzar la bolsa b_idx."""
+    """Calcula las transacciones acumuladas alcanzadas hasta la bolsa b_idx."""
     val = (T1 * b_idx - k) + np.sqrt((T1 * b_idx - k)**2 + 4 * (1 - Dmax) * k * T1 * b_idx)
     return val / (2 - 2 * Dmax)
 
 def calc_mclf_cliente(vol, P_base, T1, Dmax, k):
-    """Calcula el cobro por bolsas transaccionales (MCLF) de un volumen dado."""
+    """Calcula el cobro recurrente por bolsas para un volumen determinado."""
     if vol <= 0:
         return 0.0
     b = 1
@@ -189,7 +266,7 @@ def calc_mclf_cliente(vol, P_base, T1, Dmax, k):
 rev_actual_total = df_work["valor cobrado"].sum()
 target_rev_rec = rev_actual_total * Rev_target_pct
 
-# Algoritmo de calibración automática de P_base y T1 según los knobs activados
+# Optimización automática de P_base y T1
 def loss_recurrente(params):
     P_base, T1 = params
     if P_base <= 0 or T1 <= 1:
@@ -207,20 +284,19 @@ def loss_recurrente(params):
     rev_penalty = max(0, target_rev_rec - recurrentes_nuevos.sum())**2
     return mse + 5 * rev_penalty
 
-res_rec = opt.minimize(loss_recurrente, x0=[2000.0, 150.0], method='Nelder-Mead')
-P_base_MCLF_opt = max(50.0, res_rec.x[0])
+res_rec = opt.minimize(loss_recurrente, x0=[500.0, 1000.0], method='Nelder-Mead')
+P_base_MCLF_opt = max(10.0, res_rec.x[0])
 T1_opt = max(10.0, res_rec.x[1])
+costo_bolsa_base = P_base_MCLF_opt * T1_opt
 
 vol_max = max(1, df_work["# txn"].max())
-vol_min = max(1, df_work["# txn"].min())
-
 ICLF_target_small = max(0, target_setup_pequeño - ILF_base_param)
 ICLF_target_large = max(0, target_setup_grande - ILF_base_param)
 P_base_ICLF_opt = ICLF_target_large / vol_max
 
 df_res = df_work.copy()
 
-# 1. Recurrente Nuevo
+# 1. Calculo Recurrente Nuevo
 df_res["MCLF_Nuevo"] = df_res["# txn"].apply(lambda v: calc_mclf_cliente(v, P_base_MCLF_opt, T1_opt, D_max, k_sens))
 df_res["MLF_PSF"] = ILF_base_param * (pct_MLF + pct_PSF)
 df_res["Recurrente_Nuevo"] = np.maximum(MCB_piso, df_res["MCLF_Nuevo"] + df_res["MLF_PSF"])
@@ -228,7 +304,7 @@ df_res["Diff_Recurrente"] = df_res["Recurrente_Nuevo"] - df_res["valor cobrado"]
 df_res["Var_Pct_Recurrente"] = (df_res["Diff_Recurrente"] / np.maximum(1.0, df_res["valor cobrado"])) * 100.0
 df_res["En_Piso_MCB"] = df_res["Recurrente_Nuevo"] == MCB_piso
 
-# 2. Inicial Simulado (Como si entraran hoy como clientes nuevos)
+# 2. Inicial Simulado
 df_res["ILF_Nuevo"] = ILF_base_param
 df_res["ICLF_Nuevo"] = df_res["# txn"].apply(lambda v: max(ICLF_target_small, v * P_base_ICLF_opt))
 df_res["Inicial_Simulado"] = df_res["ILF_Nuevo"] + df_res["ICLF_Nuevo"]
@@ -253,16 +329,17 @@ diff_total = rev_nueva_total - rev_actual_total
 pct_variacion_total = (diff_total / max(1.0, rev_actual_total)) * 100.0
 
 col1, col2, col3, col4, col5 = st.columns(5)
-col1.metric("Facturación Actual", f"${rev_actual_total:,.0f} COP", help="Suma de la facturación mensual actual de la cartera analizada.")
-col2.metric("Facturación Modelo Nuevo", f"${rev_nueva_total:,.0f} COP", delta=f"{pct_variacion_total:+.1f}%", help="Impacto total estimado en la facturación mensual al aplicar los nuevos knobs.")
-col3.metric("Tarifa Piso Mensual", f"${MCB_piso:,.0f} COP", help="Piso mínimo configurado en la barra lateral.")
-col4.metric("% en Tarifa Piso", f"{(df_res['En_Piso_MCB'].sum()/len(df_res))*100:.1f}%", help="Porcentaje de clientes cuyo consumo está por debajo del piso mínimo.")
-col5.metric("Setup Total Simulado", f"${df_res['Inicial_Simulado'].sum():,.0f} COP", help="Recaudo único inicial si toda esta cartera contratara hoy de cero.")
+col1.metric("Facturación Actual Evaluada", f"${rev_actual_total:,.0f} COP", help="Suma de facturación del producto seleccionado.")
+col2.metric("Facturación Modelo Nuevo", f"${rev_nueva_total:,.0f} COP", delta=f"{pct_variacion_total:+.1f}%", help="Impacto estimado mensual.")
+col3.metric("Tarifa Piso Mensual", f"${MCB_piso:,.0f} COP")
+col4.metric("% en Tarifa Piso", f"{(df_res['En_Piso_MCB'].sum()/len(df_res))*100:.1f}%")
+col5.metric("Setup Total Simulado", f"${df_res['Inicial_Simulado'].sum():,.0f} COP")
 
 st.markdown("---")
 
-tab_exec, tab_rec, tab_init, tab_ltv, tab_data = st.tabs([
+tab_exec, tab_time, tab_rec, tab_init, tab_ltv, tab_data = st.tabs([
     "📊 Resumen Ejecutivo",
+    "📅 Tendencia Temporal",
     "📈 Recurrente: Real vs Nuevo",
     "🚀 Inicial: Simulación Entradas",
     "💎 LTV & Retención",
@@ -270,110 +347,174 @@ tab_exec, tab_rec, tab_init, tab_ltv, tab_data = st.tabs([
 ])
 
 with tab_exec:
-    st.subheader("📌 Evaluador Rápido de Impacto Financiero")
+    st.subheader(f"📌 Resumen Ejecutivo de Impacto - Producto: {prod_seleccionado}")
     
-    st.info("""
-    💡 **¿Cómo interpretar esta vista estratégica?**  
-    Aquí ves la comparativa global entre lo que recauda la empresa HOY vs. lo que recaudaría aplicando la NUEVA estructura tarifaria.
-    * **Recurrente:** Compara directamente el valor histórico mensual cobrado vs el cobro simulado por bolsas transaccionales y tarifa piso.
-    * **Iniciales (Setup):** Muestra el recaudo proyectado de tarifa de entrada si esta cartera actual fuera a ingresar hoy como clientes nuevos.
+    st.info(f"""
+    💡 **Configuración Activa:** Producto = `{prod_seleccionado}` | Año = `{anio_sel}` | Mes = `{mes_sel}` | Modo = `{eval_mode}`
     """)
 
-    col_e1, col_e2 = st.columns([1, 1])
+    col_e1, col_e2 = st.columns([1.1, 0.9])
     
     with col_e1:
-        st.markdown("### 🔍 Hallazgos Principales")
+        st.markdown("### 🔍 Claridad de los Parámetros Optimizados")
         st.markdown(f"""
-        * **Facturación Recurrente Actual (Real):** `${rev_actual_total:,.0f} COP/mes`
-        * **Facturación Proyectada Nuevo Modelo:** `${rev_nueva_total:,.0f} COP/mes`
-        * **Diferencia Neta en Recaudo:** `${diff_total:,.0f} COP/mes` ({pct_variacion_total:+.1f}%)
-        * **Clientes Protegidos por Piso Mínimo ($MCB$):** `{df_res['En_Piso_MCB'].sum()}` de `{len(df_res)}` clientes ({(df_res['En_Piso_MCB'].sum()/len(df_res))*100:.1f}%)
-        * **Tarifa Base Eficiente Calculada ($P_{{base}}$):** `${P_base_MCLF_opt:,.0f} COP` por paquete base de `{T1_opt:,.0f}` transacciones.
+        #### 🔄 Modelo Recurrente Mensual ($MCLF + MCB$)
+        * **Tarifa Base por Transacción ($P_{{base, MCLF}}$):** `${P_base_MCLF_opt:,.2f} COP/txn` *(Precio de referencia por transacción individual)*.
+        * **Capacidad de la Bolsa 1 ($T_1$):** `{T1_opt:,.0f} transacciones`.
+        * **Precio Fijo por Bolsa Recurrente ($P_{{base}} \\times T_1$):** **`${costo_bolsa_base:,.0f} COP`**.
+
+        #### 🚀 Modelo Inicial / Setup ($ILF + ICLF$)
+        * **Licencia Base Fija ($ILF_{{\\text{{base}}}}$):** **`${ILF_base_param:,.0f} COP`** *(Puesta en marcha fija)*.
+        * **Tarifa Base de Setup ($P_{{base, ICLF}}$):** `${P_base_ICLF_opt:,.2f} COP/txn` *(Capacidad de integración)*.
+        * **Cobro Setup Total Simulado:** Entre `${ILF_base_param + ICLF_target_small:,.0f} COP` y `${ILF_base_param + ICLF_target_large:,.0f} COP` según escala del cliente.
+        
+        👉 **Mecánica del Modelo Recurrente:**  
+        Cada bolsa recurrente adquirida vale exactamente **`${costo_bolsa_base:,.0f} COP`**. Sin embargo, gracias al descuento cuadrático ($D={D_max:.0%}$), la **Bolsa 1** incluye **{calc_bolsa_acum(1, T1_opt, D_max, k_sens):,.0f} txns**, la **Bolsa 2** acumula **{calc_bolsa_acum(2, T1_opt, D_max, k_sens):,.0f} txns**, y así sucesivamente, haciendo más económica cada transacción adicional.
         """)
         
         if diff_total < 0:
-            st.warning("⚠️ **Atención:** El modelo parametrizado recauda MENOS que la facturación actual. Si deseas cubrir la facturación actual, aumenta la **Meta de Recaudo** o el **Piso Mínimo Mensual** en la barra lateral.")
+            st.warning("⚠️ **Alerta:** El recaudo proyectado cae por debajo del actual. Ajusta la **Meta de Recaudo** o el **Piso Mínimo**.")
         else:
-            st.success("✅ **Modelo Alineado:** El recaudo proyectado cumple o supera la facturación histórica actual.")
+            st.success("✅ **Resultado Exitoso:** El recaudo cubre o supera la meta fijada para este producto.")
 
     with col_e2:
-        df_prod_summary = df_res.groupby("producto").agg(
-            Clientes=("cliente", "count"),
-            Recaudo_Actual=("valor cobrado", "sum"),
-            Recaudo_Nuevo=("Recurrente_Nuevo", "sum")
-        ).reset_index()
-        df_prod_summary["Variación %"] = ((df_prod_summary["Recaudo_Nuevo"] - df_prod_summary["Recaudo_Actual"]) / df_prod_summary["Recaudo_Actual"]) * 100
-        
-        fig_bar_prod = px.bar(
-            df_prod_summary, x="producto", y=["Recaudo_Actual", "Recaudo_Nuevo"],
-            barmode="group", title="Recaudo Mensual: Actual vs Nuevo por Producto",
-            labels={"value": "Monto ($ COP)", "variable": "Esquema Tarifario", "producto": "Línea de Producto"},
-            color_discrete_map={"Recaudo_Actual": "gray", "Recaudo_Nuevo": "teal"}
+        st.markdown("### 📊 Distribución de Ingresos")
+        fig_bar_exec = go.Figure(data=[
+            go.Bar(name='Facturación Real Actual', x=['Recaudo'], y=[rev_actual_total], marker_color='gray'),
+            go.Bar(name='Modelo Nuevo Proyectado', x=['Recaudo'], y=[rev_nueva_total], marker_color='teal')
+        ])
+        fig_bar_exec.update_layout(
+            barmode='group',
+            title=f"Comparativa Global de Facturación ({prod_seleccionado})",
+            yaxis_title="Monto ($ COP)",
+            height=300
         )
-        fig_bar_prod.update_layout(height=320)
-        st.plotly_chart(fig_bar_prod, use_container_width=True)
+        st.plotly_chart(fig_bar_exec, use_container_width=True)
+
+with tab_time:
+    st.subheader("📅 Tendencia Histórica de Facturación por Mes")
+    
+    df_trend = df_filtered_prod.copy()
+    df_trend["Periodo"] = df_trend["año"].astype(str) + "-" + df_trend["mes"].apply(lambda m: f"{m:02d}")
+    
+    df_time_agg = df_trend.groupby("Periodo").agg(
+        Total_Txns=("# txn", "sum"),
+        Recaudo_Real=("valor cobrado", "sum"),
+        Clientes_Activos=("cliente", "nunique")
+    ).reset_index().sort_values("Periodo")
+    
+    recaudo_modelo_hist = []
+    for per in df_time_agg["Periodo"]:
+        sub = df_trend[df_trend["Periodo"] == per]
+        tot_mod = 0
+        for _, r in sub.iterrows():
+            mclf = calc_mclf_cliente(r["# txn"], P_base_MCLF_opt, T1_opt, D_max, k_sens)
+            tot_mod += max(MCB_piso, mclf + ILF_base_param * (pct_MLF + pct_PSF))
+        recaudo_modelo_hist.append(tot_mod)
+        
+    df_time_agg["Recaudo_Modelo"] = recaudo_modelo_hist
+    
+    fig_time = go.Figure()
+    fig_time.add_trace(go.Scatter(
+        x=df_time_agg["Periodo"], y=df_time_agg["Recaudo_Real"],
+        mode='lines+markers', name='Facturación Real Histórica',
+        line=dict(color='gray', width=3)
+    ))
+    fig_time.add_trace(go.Scatter(
+        x=df_time_agg["Periodo"], y=df_time_agg["Recaudo_Modelo"],
+        mode='lines+markers', name='Nuevo Modelo Proyectado',
+        line=dict(color='teal', width=3, dash='dash')
+    ))
+    fig_time.update_layout(
+        title=f"Evolución Mensual del Recaudo para {prod_seleccionado}",
+        xaxis_title="Periodo (Año-Mes)",
+        yaxis_title="Recaudo Total ($ COP)",
+        height=400
+    )
+    st.plotly_chart(fig_time, use_container_width=True)
 
 with tab_rec:
     st.subheader("📈 Comparativa Punto a Punto: Facturación Real vs Nuevo Modelo")
     
-    st.warning("""
-    🔍 **¿Cómo evaluar los cambios visualmente al mover los controles (Knobs)?**
-    * **Puntos Rojos (●):** Factura real pagada actualmente por cada **Cliente**.
-    * **Diamantes Azules (◆):** Factura que pagaría ese mismo **Cliente** con el nuevo modelo.
-    * **Línea Punteada Naranja (--):** Piso mínimo obligatorio ($MCB_{\\text{piso}}$). Todos los clientes abajo de esta línea pagan al menos este valor.
-    * *Si mueves el slider de **Meta de Recaudo** o **Piso Mínimo**, observa cómo suben o bajan los diamantes azules respecto a los puntos rojos.*
-    """)
-    
-    col_r1, col_r2 = st.columns([2, 1])
+    col_r1, col_r2 = st.columns([1.8, 1.2])
     
     with col_r1:
         fig_rec = go.Figure()
         fig_rec.add_trace(go.Scatter(
             x=df_res["# txn"], y=df_res["valor cobrado"],
-            mode='markers', name='Cobrado Actual (Real)',
+            mode='markers', name='Factura Real Actual',
             marker=dict(color='crimson', size=9, opacity=0.7),
-            text=df_res["cliente"] + " (" + df_res["producto"] + ")",
+            text=df_res["cliente"],
             hovertemplate="<b>%{text}</b><br>Volumen: %{x:,} txns<br>Cobro Actual: $%{y:,.0f} COP<extra></extra>"
         ))
         fig_rec.add_trace(go.Scatter(
             x=df_res["# txn"], y=df_res["Recurrente_Nuevo"],
-            mode='markers', name='Nuevo Modelo (Proyectado)',
+            mode='markers', name='Nuevo Modelo (Bolsas)',
             marker=dict(color='royalblue', size=11, symbol='diamond'),
             text=df_res["cliente"],
             hovertemplate="<b>%{text}</b><br>Volumen: %{x:,} txns<br>Cobro Nuevo: $%{y:,.0f} COP<extra></extra>"
         ))
         fig_rec.add_hline(y=MCB_piso, line_dash="dash", line_color="orange", annotation_text=f"Piso Mínimo (${MCB_piso:,.0f})")
         fig_rec.update_layout(
-            title="Facturación Mensual por Cliente según Volumen Transaccional",
+            title=f"Cobro Mensual por Cliente vs Volumen Transaccional ({prod_seleccionado})",
             xaxis_title="Volumen Transaccional Mensual (# txn)",
             yaxis_title="Cobro Mensual ($ COP)",
             xaxis_type="log",
-            height=460
+            height=440
         )
         st.plotly_chart(fig_rec, use_container_width=True)
         
     with col_r2:
-        st.markdown("#### 📊 Variación Porcentual del Cobro")
-        st.write("Muestra qué porcentaje sube o baja la factura para cada cliente.")
-        
+        st.markdown("#### 📊 Distribución de Variación % vs Actual")
         fig_hist = px.histogram(
-            df_res, x="Var_Pct_Recurrente", nbins=18,
-            title="Distribución de Variación % vs Actual",
+            df_res, x="Var_Pct_Recurrente", nbins=15,
+            title="Variación % en la Factura del Cliente",
             labels={"Var_Pct_Recurrente": "Variación % vs Factura Actual"},
             color_discrete_sequence=['darkcyan']
         )
         fig_hist.update_layout(height=340)
         st.plotly_chart(fig_hist, use_container_width=True)
 
+    st.markdown("---")
+    st.markdown("### 📋 Tabla Escalar de Bolsas Transaccionales (Ecuación Cuadrática con Descuento)")
+    st.caption("Esta tabla ilustra cómo cada bolsa adicional cuesta exactamente la misma tarifa fija, pero acomoda progresivamente mayor cantidad de transacciones.")
+
+    # Generación de la tabla de bolsas
+    bolsas_list = []
+    prev_acum = 0
+    for b in range(1, 11):
+        acum_txns = calc_bolsa_acum(b, T1_opt, D_max, k_sens)
+        txns_en_bolsa = acum_txns - prev_acum
+        costo_total = b * costo_bolsa_base
+        tarifa_efectiva = costo_total / acum_txns if acum_txns > 0 else 0
+        desc_pct = (1 - (tarifa_efectiva / P_base_MCLF_opt)) * 100 if P_base_MCLF_opt > 0 else 0
+        
+        bolsas_list.append({
+            "Bolsa #": f"Bolsa {b}",
+            "Costo Fijo por Bolsa": costo_bolsa_base,
+            "Costo Acumulado Total": costo_total,
+            "Capacidad Txn Acumulada": int(round(acum_txns)),
+            "Txns Adicionales en esta Bolsa": int(round(txns_en_bolsa)),
+            "Tarifa Promedio ($/txn)": tarifa_efectiva,
+            "Descuento Efectivo (%)": max(0.0, desc_pct)
+        })
+        prev_acum = acum_txns
+
+    df_bolsas_tbl = pd.DataFrame(bolsas_list)
+    st.dataframe(
+        df_bolsas_tbl.style.format({
+            "Costo Fijo por Bolsa": "${:,.0f} COP",
+            "Costo Acumulado Total": "${:,.0f} COP",
+            "Capacidad Txn Acumulada": "{:,}",
+            "Txns Adicionales en esta Bolsa": "{:,}",
+            "Tarifa Promedio ($/txn)": "${:,.2f} COP",
+            "Descuento Efectivo (%)": "{:.1f}%"
+        }),
+        use_container_width=True
+    )
+
 with tab_init:
-    st.subheader("🚀 Cobro Único de Entrada ($ILF + ICLF$) - Simulación de Nuevos Ingresos")
-    
-    st.info("""
-    💡 **¿Qué muestra esta sección? (Sin comparación histórica)**  
-    Muestra descriptivamente **cuánto se le cobraría a cada cliente actual de entrada** si fueran contratados hoy de cero.
-    * **ILF (Gris Oscuro):** Licencia Fija de entrada (Setup / Onboarding).
-    * **ICLF (Naranja):** Cargo proporcional a la Capacidad / Volumen transaccional estimado.
-    """)
+    st.subheader("🚀 Cobro Único de Entrada ($ILF + ICLF$) - Simulación de Onboarding")
     
     col_i1, col_i2 = st.columns([2, 1])
     
@@ -381,97 +522,144 @@ with tab_init:
         fig_init = go.Figure()
         fig_init.add_trace(go.Bar(
             x=df_res["cliente"], y=df_res["ILF_Nuevo"],
-            name="ILF (Licencia Base Fija)", marker_color="darkslategrey",
-            hovertemplate="<b>%{x}</b><br>ILF Base: $%{y:,.0f} COP<extra></extra>"
+            name="ILF (Licencia Base Fija)", marker_color="darkslategrey"
         ))
         fig_init.add_trace(go.Bar(
             x=df_res["cliente"], y=df_res["ICLF_Nuevo"],
-            name="ICLF (Capacidad de Setup)", marker_color="sandybrown",
-            hovertemplate="<b>%{x}</b><br>ICLF Capacidad: $%{y:,.0f} COP<extra></extra>"
+            name="ICLF (Capacidad de Setup)", marker_color="sandybrown"
         ))
         fig_init.update_layout(
             barmode='stack',
-            title="Estructura del Cobro Único Inicial por Cliente",
-            xaxis_title="Clientes Actuales",
+            title=f"Estructura del Cobro Inicial Simulado por Cliente ({prod_seleccionado})",
+            xaxis_title="Clientes",
             yaxis_title="Cobro Inicial ($ COP)",
-            height=450
+            height=430
         )
         st.plotly_chart(fig_init, use_container_width=True)
         
     with col_i2:
-        st.markdown("#### 📋 Resumen Descriptivo del Setup")
-        st.metric("Cobro Inicial Promedio", f"${df_res['Inicial_Simulado'].mean():,.0f} COP")
-        st.metric("Cobro Inicial Mínimo", f"${df_res['Inicial_Simulado'].min():,.0f} COP")
-        st.metric("Cobro Inicial Máximo", f"${df_res['Inicial_Simulado'].max():,.0f} COP")
-        
-        fig_scatter_init = px.scatter(
-            df_res, x="# txn", y="Inicial_Simulado", color="producto", hover_name="cliente",
-            title="Cobro Inicial vs Volumen Transaccional",
-            log_x=True
-        )
-        fig_scatter_init.update_layout(height=260)
-        st.plotly_chart(fig_scatter_init, use_container_width=True)
+        st.markdown("#### 📋 Métricas del Setup Proyectado")
+        st.metric("Setup Promedio por Cliente", f"${df_res['Inicial_Simulado'].mean():,.0f} COP")
+        st.metric("Setup Mínimo", f"${df_res['Inicial_Simulado'].min():,.0f} COP")
+        st.metric("Setup Máximo", f"${df_res['Inicial_Simulado'].max():,.0f} COP")
 
 with tab_ltv:
     st.subheader("💎 Valor del Cliente en el Tiempo (LTV Proyectado)")
     
-    st.info(f"""
-    💡 **¿Qué es el LTV (Lifetime Value)?**  
-    Es el ingreso total proyectado que genera cada **Cliente** sumando el **Cobro Inicial ($ILF+ICLF$)** y su **Cobro Recurrente Mensual** 
-    a `{meses_ltv} meses`, descontando la tasa de cancelación (Churn) configurada.
-    """)
-    
     fig_ltv = px.scatter(
-        df_res, x="# txn", y="LTV_Proyectado", color="producto", size="Recurrente_Nuevo",
+        df_res, x="# txn", y="LTV_Proyectado", size="Recurrente_Nuevo",
         hover_name="cliente", hover_data=["cliente", "Inicial_Simulado", "Recurrente_Nuevo"],
-        log_x=True, title=f"LTV Proyectado a {meses_ltv} Meses por Cliente (Tamaño = Cobro Recurrente Mensual)"
+        log_x=True, title=f"LTV Proyectado a {meses_ltv} Meses para {prod_seleccionado}",
+        color_discrete_sequence=['teal']
     )
-    fig_ltv.update_layout(height=450)
+    fig_ltv.update_layout(height=430)
     st.plotly_chart(fig_ltv, use_container_width=True)
 
 with tab_data:
-    st.subheader("🔍 Inspector por Cliente y Exportación de Datos")
+    st.subheader("🔍 Inspección Cliente por Cliente y Exportación")
     
-    st.markdown("### 👤 Inspeccionar un Cliente Específico")
     cliente_sel = st.selectbox("Selecciona un cliente para evaluar su impacto individual:", df_res["cliente"].unique())
-    
     row_c = df_res[df_res["cliente"] == cliente_sel].iloc[0]
     
-    col_c1, col_c2, col_c3, col_c4 = st.columns(4)
+    col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns(5)
     col_c1.metric("Línea de Producto", str(row_c["producto"]))
     col_c2.metric("Volumen Transaccional", f"{row_c['# txn']:,} txns")
     col_c3.metric("Facturación Actual", f"${row_c['valor cobrado']:,.0f} COP")
-    col_c4.metric("Facturación Nueva", f"${row_c['Recurrente_Nuevo']:,.0f} COP", delta=f"{row_c['Var_Pct_Recurrente']:+.1f}%")
+    col_c4.metric("Facturación Recurrente Nueva", f"${row_c['Recurrente_Nuevo']:,.0f} COP", delta=f"{row_c['Var_Pct_Recurrente']:+.1f}%")
+    col_c5.metric("Setup Inicial Simulado", f"${row_c['Inicial_Simulado']:,.0f} COP")
     
-    with st.expander(f"📌 Desglose Detallado del Cliente: {row_c['cliente']}", expanded=True):
+    st.markdown("---")
+    st.markdown(f"### 📦 Desglose Tarifario Detallado para **{row_c['cliente']}**")
+    
+    vol_c = row_c["# txn"]
+    
+    # Determinar cantidad exacta de bolsas para el volumen de este cliente
+    b_c = 1
+    acum_c = calc_bolsa_acum(b_c, T1_opt, D_max, k_sens)
+    while acum_c < vol_c and b_c < 200:
+        b_c += 1
+        acum_c = calc_bolsa_acum(b_c, T1_opt, D_max, k_sens)
+        
+    mclf_c = row_c["MCLF_Nuevo"]
+    ilf_c = row_c["ILF_Nuevo"]
+    iclf_c = row_c["ICLF_Nuevo"]
+    setup_tot_c = row_c["Inicial_Simulado"]
+    rec_tot_c = row_c["Recurrente_Nuevo"]
+    
+    col_detail1, col_detail2 = st.columns(2)
+    
+    with col_detail1:
+        st.markdown("#### 🔄 Resumen Recurrente ($MCLF + MCB$)")
         st.markdown(f"""
-        * **Cliente:** `{row_c['cliente']}`
-        * **Cobro Recurrente Nuevo:** `${row_c['Recurrente_Nuevo']:,.0f} COP/mes`
-          * *Bolsas Transaccionales ($MCLF$):* `${row_c['MCLF_Nuevo']:,.0f} COP`
-          * *Mantenimiento y Soporte ($MLF+PSF$):* `${row_c['MLF_PSF']:,.0f} COP`
-          * *¿Entró en Tarifa Piso ($MCB$)?* `{"SÍ (Ajustado a Tarifa Mínima)" if row_c["En_Piso_MCB"] else "NO (Pagando por Consumo/Bolsa)"}`
-        * **Cobro Inicial Simulado ($Setup$):** `${row_c['Inicial_Simulado']:,.0f} COP`
-          * *Licencia Base Fija ($ILF$):* `${row_c['ILF_Nuevo']:,.0f} COP`
-          * *Capacidad ($ICLF$):* `${row_c['ICLF_Nuevo']:,.0f} COP`
-        * **LTV Proyectado ({meses_ltv} meses):** `${row_c['LTV_Proyectado']:,.0f} COP`
+        * **Bolsas Recurrentes Requeridas:** `{b_c} bolsa(s)` (Capacidad total alcanzada: {acum_c:,.0f} txns)
+        * **Precio Fijo por Bolsa:** `${costo_bolsa_base:,.0f} COP`
+        * **Subtotal Bolsas ($MCLF$):** `${mclf_c:,.0f} COP`
+        * **Mantenimiento & Soporte ($MLF+PSF$):** `${row_c['MLF_PSF']:,.0f} COP`
+        * **Cobro Recurrente Total Aplicado:** **`${rec_tot_c:,.0f} COP`** `{"(Aplica Tarifa Mínima MCB)" if row_c["En_Piso_MCB"] else ""}`
+        """)
+        
+    with col_detail2:
+        st.markdown("#### 🚀 Resumen Setup Inicial ($ILF + ICLF$)")
+        st.markdown(f"""
+        * **Licencia Base Fija ($ILF$):** `${ilf_c:,.0f} COP`
+        * **Capacidad Inicial ($ICLF$):** `${iclf_c:,.0f} COP` *(Calculado a ${P_base_ICLF_opt:,.2f} COP/txn)*
+        * **Cobro Único de Entrada Total:** **`${setup_tot_c:,.0f} COP`**
+        * **LTV Proyectado a {meses_ltv} Meses:** `${row_c['LTV_Proyectado']:,.0f} COP`
         """)
 
-    st.markdown("---")
-    st.markdown("### 📄 Tabla Completa de Cartera y Simulación")
+    st.markdown(f"#### 📊 Tabla de Estructura de Bolsas Aplicada a **{row_c['cliente']}** ({vol_c:,} txns)")
     
-    display_cols = ["cliente", "producto", "# txn", "valor cobrado", "Recurrente_Nuevo", "Diff_Recurrente", "Var_Pct_Recurrente", "ILF_Nuevo", "ICLF_Nuevo", "Inicial_Simulado", "LTV_Proyectado"]
+    client_bolsas_list = []
+    prev_a = 0
+    for b in range(1, b_c + 1):
+        acum_t = calc_bolsa_acum(b, T1_opt, D_max, k_sens)
+        txns_b = acum_t - prev_a
+        c_total = b * costo_bolsa_base
+        tar_ef = c_total / acum_t if acum_t > 0 else 0
+        desc_p = (1 - (tar_ef / P_base_MCLF_opt)) * 100 if P_base_MCLF_opt > 0 else 0
+        es_bolsa_final = (b == b_c)
+        
+        client_bolsas_list.append({
+            "Bolsa #": f"Bolsa {b}" + (" (Última requerida)" if es_bolsa_final else ""),
+            "Costo Fijo por Bolsa": costo_bolsa_base,
+            "Costo Acumulado MCLF": c_total,
+            "Capacidad Txn Acumulada": int(round(acum_t)),
+            "Txns Adicionales en Bolsa": int(round(txns_b)),
+            "Tarifa Promedio ($/txn)": tar_ef,
+            "Descuento Efectivo (%)": max(0.0, desc_p)
+        })
+        prev_a = acum_t
+
+    df_client_bolsas = pd.DataFrame(client_bolsas_list)
+    st.dataframe(
+        df_client_bolsas.style.format({
+            "Costo Fijo por Bolsa": "${:,.0f} COP",
+            "Costo Acumulado MCLF": "${:,.0f} COP",
+            "Capacidad Txn Acumulada": "{:,}",
+            "Txns Adicionales en Bolsa": "{:,}",
+            "Tarifa Promedio ($/txn)": "${:,.2f} COP",
+            "Descuento Efectivo (%)": "{:.1f}%"
+        }),
+        use_container_width=True
+    )
+
+    st.markdown("---")
+    st.markdown("### 📄 Tabla de Cartera y Resultados de Simulación")
+    
+    cols_base = ["cliente", "producto", "año", "mes", "# txn", "valor cobrado", "Recurrente_Nuevo", "Diff_Recurrente", "Var_Pct_Recurrente", "Inicial_Simulado", "LTV_Proyectado"]
+    display_cols = [c for c in cols_base if c in df_res.columns]
+    
     df_styled = df_res[display_cols].copy()
     
     st.dataframe(
         df_styled.style.format({
-            "valor cobrado": "${:,.0f}",
-            "Recurrente_Nuevo": "${:,.0f}",
-            "Diff_Recurrente": "${:,.0f}",
+            "# txn": "{:,}",
+            "valor cobrado": "${:,.0f} COP",
+            "Recurrente_Nuevo": "${:,.0f} COP",
+            "Diff_Recurrente": "${:,.0f} COP",
             "Var_Pct_Recurrente": "{:+.1f}%",
-            "ILF_Nuevo": "${:,.0f}",
-            "ICLF_Nuevo": "${:,.0f}",
-            "Inicial_Simulado": "${:,.0f}",
-            "LTV_Proyectado": "${:,.0f}"
+            "Inicial_Simulado": "${:,.0f} COP",
+            "LTV_Proyectado": "${:,.0f} COP"
         }),
         use_container_width=True
     )
@@ -481,6 +669,6 @@ with tab_data:
     st.download_button(
         label="📥 Descargar Simulación Completa (CSV)",
         data=csv_buffer.getvalue(),
-        file_name="simulacion_tarifas_clientes_ptesa.csv",
+        file_name=f"simulacion_tarifaria_{prod_seleccionado}_{anio_sel}_{mes_sel}.csv",
         mime="text/csv"
     )
