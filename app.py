@@ -263,7 +263,7 @@ with st.sidebar.expander("Parametros Recurrentes (MCLF + MCB)", expanded=True):
         help="Porcentaje sobre la Licencia Base (ILF) cobrado mensualmente por soporte operativo."
     ) / 100.0
 
-st.sidebar.header("4. Ajuste del Modelo Inicial (Setup)")
+st.sidebar.header("4. Ajuste del Modelo Inicial")
 with st.sidebar.expander("Parametros de Entrada (ILF + ICLF)", expanded=True):
     ILF_base_param = st.number_input(
         "Licencia Base Fija (ILF base COP)",
@@ -393,7 +393,7 @@ col1.metric("Facturacion Actual", f"${rev_actual_total:,.0f} COP")
 col2.metric("Facturacion Modelo Nuevo", f"${rev_nueva_total:,.0f} COP", delta=f"{pct_variacion_total:+.1f}%")
 col3.metric("Tarifa Piso Mensual", f"${MCB_piso:,.0f} COP")
 col4.metric("% en Tarifa Piso", f"{(df_res['En_Piso_MCB'].sum()/max(1, len(df_res)))*100:.1f}%")
-col5.metric("Setup Total Simulado", f"${df_res['Inicial_Simulado'].sum():,.0f} COP")
+col5.metric("Cobro Inicial Total Simulado", f"${df_res['Inicial_Simulado'].sum():,.0f} COP")
 
 st.markdown("---")
 
@@ -418,7 +418,7 @@ with tab_exec:
       * Tarifa Base Recurrente ($P_{{base, MCLF}}$): `${P_base_MCLF_opt:,.2f} COP/txn`
       * Capacidad Base de Bolsa ($T_1$): `{T1_opt:,.0f} transacciones` *{"(Optimizado automáticamente)" if optimizar_T1 else "(Fijado comercialmente)"}*
       * Precio Fijo por Bolsa Recurrente: **`${costo_bolsa_mclf:,.0f} COP`**
-    * **Modelo Inicial / Setup (ILF + ICLF):**
+    * **Modelo Inicial (ILF + ICLF):**
       * Licencia Base Fija ($ILF_{{\\text{{base}}}}$): **`${ILF_base_param:,.0f} COP`**
       * Tarifa Base Inicial ($P_{{base, ICLF}}$): `${P_base_ICLF_opt:,.2f} COP/txn`
       * Precio Fijo por Bolsa Inicial ($ICLF$): **`${costo_bolsa_ICLF_opt:,.0f} COP`**
@@ -599,7 +599,7 @@ with tab_rec:
         st.plotly_chart(fig_dist_pct, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("### Tabla Escalar de Bolsas Recurrentes Mensuales (MCLF)")
+    st.markdown("### Tabla de Bolsas Recurrentes Mensuales (MCLF)")
     st.caption("Esta tabla ilustra la expansión progresiva de transacciones contenidas por bolsa y el costo acumulado.")
 
     bolsas_list = []
@@ -653,7 +653,7 @@ with tab_init:
     ))
     fig_init.add_trace(go.Bar(
         x=df_init_unique["cliente"], y=df_init_unique["ICLF_Nuevo"],
-        name="ICLF (Capacidad de Setup)", marker_color="sandybrown"
+        name="ICLF", marker_color="sandybrown"
     ))
     fig_init.update_layout(
         barmode='stack',
@@ -668,21 +668,21 @@ with tab_init:
         df_init_unique, x="txns_media", y="Inicial_Simulado",
         text="cliente", hover_name="cliente",
         labels={"txns_media": "Volumen Transaccional Promedio (# txn)", "Inicial_Simulado": "Cobro Inicial Total ($ COP)"},
-        title="Escalado del Setup Inicial vs Volumen",
+        title="Cobro Inicial vs Volumen",
         color_discrete_sequence=['coral']
     )
     fig_setup_scatter.update_traces(marker=dict(size=10))
     fig_setup_scatter.update_layout(height=380, xaxis_type="log")
     st.plotly_chart(fig_setup_scatter, use_container_width=True)
 
-    st.markdown("### Metricas Clave del Setup Proyectado")
+    st.markdown("### Metricas Clave del Cobro inicial Proyectado")
     c_s1, c_s2, c_s3 = st.columns(3)
-    c_s1.metric("Setup Promedio", f"${df_init_unique['Inicial_Simulado'].mean():,.0f} COP")
-    c_s2.metric("Setup Mínimo", f"${df_init_unique['Inicial_Simulado'].min():,.0f} COP")
-    c_s3.metric("Setup Máximo", f"${df_init_unique['Inicial_Simulado'].max():,.0f} COP")
+    c_s1.metric("Cobro inicial Promedio", f"${df_init_unique['Inicial_Simulado'].mean():,.0f} COP")
+    c_s2.metric("Cobro inicial Mínimo", f"${df_init_unique['Inicial_Simulado'].min():,.0f} COP")
+    c_s3.metric("Cobro inicial Máximo", f"${df_init_unique['Inicial_Simulado'].max():,.0f} COP")
 
     st.markdown("---")
-    st.markdown("### Tabla Escalar de Bolsas Iniciales (ICLF)")
+    st.markdown("### Tabla de Bolsas Iniciales (ICLF)")
     st.caption("Esta tabla ilustra cómo se estructuran las bolsas para el cobro por capacidad inicial de entrada.")
 
     bolsas_iclf_list = []
@@ -778,7 +778,7 @@ with tab_data:
     col_c2.metric("Volumen Transaccional", f"{row_c['# txn']:,} txns")
     col_c3.metric("Facturacion Actual", f"${row_c['valor cobrado']:,.0f} COP")
     col_c4.metric("Facturacion Recurrente", f"${row_c['Recurrente_Nuevo']:,.0f} COP", delta=f"{row_c['Var_Pct_Recurrente']:+.1f}%")
-    col_c5.metric("Setup Inicial Simulado", f"${row_c['Inicial_Simulado']:,.0f} COP")
+    col_c5.metric("Cobro inicial Simulado", f"${row_c['Inicial_Simulado']:,.0f} COP")
 
     st.markdown("---")
     st.markdown(f"### Desglose Tarifario para {row_c['cliente']}")
