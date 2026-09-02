@@ -72,14 +72,14 @@ def load_and_standardize_data(uploaded_file):
         productos = ["Pasarela Pagos", "Corresponsales", "Billetera Virtual"]
         anios = [2024]
         meses = list(range(1, 7))
-        
+
         rows = []
         for c_idx in range(n_clientes):
             prod = np.random.choice(productos)
             base_txns = np.random.randint(400, 15000)
             base_val = base_txns * np.random.uniform(120, 250) + 900000
             cliente_nombre = f"Empresa Alpha {c_idx+1:02d}"
-            
+
             for anio in anios:
                 for mes in meses:
                     noise = np.random.uniform(0.88, 1.12)
@@ -112,7 +112,7 @@ def load_and_standardize_data(uploaded_file):
             col_map[col] = "valor cobrado"
 
     df = df.rename(columns=col_map)
-    
+
     if "cliente" not in df.columns:
         df["cliente"] = [f"Cliente {i+1:02d}" for i in range(len(df))]
     if "producto" not in df.columns:
@@ -125,14 +125,14 @@ def load_and_standardize_data(uploaded_file):
         df["# txn"] = 1000
     if "valor cobrado" not in df.columns:
         df["valor cobrado"] = 1500000.0
-        
+
     df["año"] = pd.to_numeric(df["año"], errors='coerce').fillna(2024).astype(int)
     df["mes"] = pd.to_numeric(df["mes"], errors='coerce').fillna(1).astype(int)
     df["# txn"] = pd.to_numeric(df["# txn"], errors='coerce').fillna(1).astype(int)
     df["valor cobrado"] = pd.to_numeric(df["valor cobrado"], errors='coerce').fillna(0.0)
     df["cliente"] = df["cliente"].astype(str)
     df["producto"] = df["producto"].astype(str)
-        
+
     return df
 
 st.sidebar.header("1. Carga de Datos")
@@ -270,13 +270,13 @@ with st.sidebar.expander("Parametros de Entrada (ILF + ICLF)", expanded=True):
         value=2500000, step=500000,
         help="Monto fijo de entrada cobrado a todo cliente por onboarding y parametrización inicial."
     )
-    
+
     ICLF_target_small = st.number_input(
         "ICLF Objetivo para cliente pequeño (COP)",
         value=2000000, step=500000,
         help="Meta de cobro inicial por capacidad (ICLF) para el cliente de menor volumen de la cartera."
     )
-    
+
     ICLF_target_large = st.number_input(
         "ICLF Objetivo para cliente grande (COP)",
         value=27500000, step=1000000,
@@ -319,14 +319,14 @@ if optimizar_T1:
         P_base, T1 = params
         if P_base <= 0 or T1 <= 1:
             return 1e15
-        
+
         recurrentes_nuevos = []
         for _, row in df_work.iterrows():
             mclf = calc_mclf_cliente(row["# txn"], P_base, T1, D_max, k_sens)
             mlf_psf = ILF_base_param * (pct_MLF + pct_PSF)
             tot = max(MCB_piso, mclf + mlf_psf)
             recurrentes_nuevos.append(tot)
-        
+
         recurrentes_nuevos = np.array(recurrentes_nuevos)
         mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
         rev_penalty = max(0, target_rev_rec - recurrentes_nuevos.sum())**2
@@ -341,14 +341,14 @@ else:
         T1 = float(T1_fijo_user)
         if P_base <= 0:
             return 1e15
-        
+
         recurrentes_nuevos = []
         for _, row in df_work.iterrows():
             mclf = calc_mclf_cliente(row["# txn"], P_base, T1, D_max, k_sens)
             mlf_psf = ILF_base_param * (pct_MLF + pct_PSF)
             tot = max(MCB_piso, mclf + mlf_psf)
             recurrentes_nuevos.append(tot)
-        
+
         recurrentes_nuevos = np.array(recurrentes_nuevos)
         mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
         rev_penalty = max(0, target_rev_rec - recurrentes_nuevos.sum())**2
@@ -408,11 +408,11 @@ tab_exec, tab_time, tab_rec, tab_init, tab_ltv, tab_data = st.tabs([
 
 with tab_exec:
     st.subheader(f"Resumen de Impacto - Producto: {prod_seleccionado}")
-    
+
     st.info(f"Configuracion Activa: Producto = {prod_seleccionado} | Año = {anio_sel} | Mes = {mes_sel} | Modo = {eval_mode}")
 
     st.markdown("### Estructura de Precios por Bolsas Optimizada")
-    
+
     st.markdown(f"""
     * **Modelo Recurrente Mensual (MCLF + MCB):**
       * Tarifa Base Recurrente ($P_{{base, MCLF}}$): `${P_base_MCLF_opt:,.2f} COP/txn`
@@ -444,16 +444,16 @@ with tab_exec:
 
 with tab_time:
     st.subheader("Comparativo Historico de Facturacion")
-    
+
     df_trend = df_filtered_prod.copy()
     df_trend["Periodo"] = df_trend["año"].astype(str) + "-" + df_trend["mes"].apply(lambda m: f"{m:02d}")
-    
+
     df_time_agg = df_trend.groupby("Periodo").agg(
         Total_Txns=("# txn", "sum"),
         Recaudo_Real=("valor cobrado", "sum"),
         Clientes_Activos=("cliente", "nunique")
     ).reset_index().sort_values("Periodo")
-    
+
     recaudo_modelo_hist = []
     for per in df_time_agg["Periodo"]:
         sub = df_trend[df_trend["Periodo"] == per]
@@ -462,9 +462,9 @@ with tab_time:
             mclf = calc_mclf_cliente(r["# txn"], P_base_MCLF_opt, T1_opt, D_max, k_sens)
             tot_mod += max(MCB_piso, mclf + ILF_base_param * (pct_MLF + pct_PSF))
         recaudo_modelo_hist.append(tot_mod)
-        
+
     df_time_agg["Recurrente_Modelo"] = recaudo_modelo_hist
-    
+
     fig_time = go.Figure()
     fig_time.add_trace(go.Scatter(
         x=df_time_agg["Periodo"], y=df_time_agg["Recaudo_Real"],
@@ -486,7 +486,7 @@ with tab_time:
 
 with tab_rec:
     st.subheader("Analisis Recurrente: Facturacion Real vs Nuevo Modelo")
-    
+
     fig_rec = go.Figure()
     fig_rec.add_trace(go.Scatter(
         x=df_res["# txn"], y=df_res["valor cobrado"],
@@ -511,15 +511,92 @@ with tab_rec:
         height=420
     )
     st.plotly_chart(fig_rec, use_container_width=True)
-    
-    fig_hist = px.histogram(
-        df_res, x="Var_Pct_Recurrente", nbins=15,
-        title="Distribucion de Variacion % en la Factura del Cliente",
-        labels={"Var_Pct_Recurrente": "Variación % vs Factura Actual"},
-        color_discrete_sequence=['darkcyan']
-    )
-    fig_hist.update_layout(height=350)
-    st.plotly_chart(fig_hist, use_container_width=True)
+
+    st.markdown("---")
+    st.subheader("Distribucion de Impacto y Variacion en la Factura")
+
+    # Columnas anuales de impacto en COP
+    df_res["Diff_Recurrente_Anual"] = df_res["Diff_Recurrente"] * 12.0
+    df_res["valor_cobrado_Anual"] = df_res["valor cobrado"] * 12.0
+    df_res["Recurrente_Nuevo_Anual"] = df_res["Recurrente_Nuevo"] * 12.0
+
+    # Deteccion de outliers extremos por IQR (Q3 + 3*IQR) o variaciones porcentuales > 300%
+    q1_var = df_res["Var_Pct_Recurrente"].quantile(0.25)
+    q3_var = df_res["Var_Pct_Recurrente"].quantile(0.75)
+    iqr_var = q3_var - q1_var
+
+    if iqr_var > 0:
+        outlier_mask = (df_res["Var_Pct_Recurrente"] > (q3_var + 3.0 * iqr_var)) | (df_res["Var_Pct_Recurrente"] < (q1_var - 3.0 * iqr_var))
+    else:
+        outlier_mask = df_res["Var_Pct_Recurrente"].abs() > 300.0
+
+    df_outliers = df_res[outlier_mask]
+    df_clean = df_res[~outlier_mask] if len(df_res[~outlier_mask]) > 0 else df_res.copy()
+
+    if not df_outliers.empty:
+        st.warning(f"**Atención - Outliers Extremos Detectados ({len(df_outliers)} cliente/s):**")
+        for _, row_out in df_outliers.iterrows():
+            st.markdown(
+                f"* **{row_out['cliente']}**: Volumen = `{row_out['# txn']:,} txns` | Factura Actual = `${row_out['valor cobrado']:,.0f} COP/mes` | Factura Nueva = `${row_out['Recurrente_Nuevo']:,.0f} COP/mes` | **Variación = {row_out['Var_Pct_Recurrente']:+.1f}%**"
+            )
+        st.caption("Estos registros con variaciones atípicas se excluyen automáticamente de los gráficos de distribución a continuación para mantener la escala legible.")
+
+    col_ctrl1, col_ctrl2 = st.columns(2)
+    with col_ctrl1:
+        vista_temporal = st.radio(
+            "Temporalidad de la Factura",
+            ["Mensual", "Anual"],
+            horizontal=True,
+            key="rec_vista_temporal"
+        )
+    with col_ctrl2:
+        tipo_grafico = st.radio(
+            "Tipo de Gráfico",
+            ["Boxplot", "Histograma"],
+            horizontal=True,
+            key="rec_tipo_grafico"
+        )
+
+    val_col = "Diff_Recurrente" if vista_temporal == "Mensual" else "Diff_Recurrente_Anual"
+    unit_label = "COP/mes" if vista_temporal == "Mensual" else "COP/año"
+
+    col_g1, col_g2 = st.columns(2)
+
+    with col_g1:
+        if tipo_grafico == "Boxplot":
+            fig_dist_cop = px.box(
+                df_clean, y=val_col, points="all", hover_name="cliente",
+                title=f"Distribucion de Diferencia en Factura ({vista_temporal} - $ COP)",
+                labels={val_col: f"Diferencia en Factura ({unit_label})"},
+                color_discrete_sequence=['darkcyan']
+            )
+        else:
+            fig_dist_cop = px.histogram(
+                df_clean, x=val_col, nbins=15, hover_name="cliente",
+                title=f"Distribucion de Diferencia en Factura ({vista_temporal} - $ COP)",
+                labels={val_col: f"Diferencia en Factura ({unit_label})"},
+                color_discrete_sequence=['darkcyan']
+            )
+        fig_dist_cop.update_layout(height=360)
+        st.plotly_chart(fig_dist_cop, use_container_width=True)
+
+    with col_g2:
+        if tipo_grafico == "Boxplot":
+            fig_dist_pct = px.box(
+                df_clean, y="Var_Pct_Recurrente", points="all", hover_name="cliente",
+                title=f"Distribucion de Variacion % en Factura ({vista_temporal})",
+                labels={"Var_Pct_Recurrente": "Variación % vs Factura Actual"},
+                color_discrete_sequence=['teal']
+            )
+        else:
+            fig_dist_pct = px.histogram(
+                df_clean, x="Var_Pct_Recurrente", nbins=15, hover_name="cliente",
+                title=f"Distribucion de Variacion % en Factura ({vista_temporal})",
+                labels={"Var_Pct_Recurrente": "Variación % vs Factura Actual"},
+                color_discrete_sequence=['teal']
+            )
+        fig_dist_pct.update_layout(height=360)
+        st.plotly_chart(fig_dist_pct, use_container_width=True)
 
     st.markdown("---")
     st.markdown("### Tabla Escalar de Bolsas Recurrentes Mensuales (MCLF)")
@@ -533,7 +610,7 @@ with tab_rec:
         costo_total = b * costo_bolsa_mclf
         tarifa_efectiva = costo_total / acum_txns if acum_txns > 0 else 0
         desc_pct = (1 - (tarifa_efectiva / P_base_MCLF_opt)) * 100 if P_base_MCLF_opt > 0 else 0
-        
+
         bolsas_list.append({
             "Bolsa #": f"Bolsa {b}",
             "Costo Fijo por Bolsa": costo_bolsa_mclf,
@@ -586,7 +663,7 @@ with tab_init:
         height=420
     )
     st.plotly_chart(fig_init, use_container_width=True)
-    
+
     fig_setup_scatter = px.scatter(
         df_init_unique, x="txns_media", y="Inicial_Simulado",
         text="cliente", hover_name="cliente",
@@ -616,7 +693,7 @@ with tab_init:
         costo_total_iclf = b * costo_bolsa_ICLF_opt
         tarifa_efectiva = costo_total_iclf / acum_txns if acum_txns > 0 else 0
         desc_pct = (1 - (tarifa_efectiva / P_base_ICLF_opt)) * 100 if P_base_ICLF_opt > 0 else 0
-        
+
         bolsas_iclf_list.append({
             "Bolsa #": f"Bolsa {b}",
             "Costo Fijo por Bolsa ICLF": costo_bolsa_ICLF_opt,
@@ -692,25 +769,25 @@ with tab_ltv:
 
 with tab_data:
     st.subheader("Detalle Cliente")
-    
+
     cliente_sel = st.selectbox("Selecciona un cliente para evaluar su impacto individual:", df_res["cliente"].unique())
     row_c = df_res[df_res["cliente"] == cliente_sel].iloc[0]
-    
+
     col_c1, col_c2, col_c3, col_c4, col_c5 = st.columns(5)
     col_c1.metric("Linea Producto", str(row_c["producto"]))
     col_c2.metric("Volumen Transaccional", f"{row_c['# txn']:,} txns")
     col_c3.metric("Facturacion Actual", f"${row_c['valor cobrado']:,.0f} COP")
     col_c4.metric("Facturacion Recurrente", f"${row_c['Recurrente_Nuevo']:,.0f} COP", delta=f"{row_c['Var_Pct_Recurrente']:+.1f}%")
     col_c5.metric("Setup Inicial Simulado", f"${row_c['Inicial_Simulado']:,.0f} COP")
-    
+
     st.markdown("---")
     st.markdown(f"### Desglose Tarifario para {row_c['cliente']}")
-    
+
     vol_c = row_c["# txn"]
-    
+
     b_c_mclf, acum_c_mclf = calc_num_bolsas(vol_c, T1_opt, D_max, k_sens)
     b_c_iclf, acum_c_iclf = calc_num_bolsas(vol_c, T1_opt, D_max, k_sens)
-        
+
     mclf_c = row_c["MCLF_Nuevo"]
     mlf_psf_c = row_c["MLF_PSF"]
     rec_tot_c = row_c["Recurrente_Nuevo"]
@@ -723,7 +800,7 @@ with tab_data:
 
     with col_det1:
         st.markdown("#### Desglose Recurrente Mensual (MCLF + MCB)")
-        
+
         df_rec_summary = pd.DataFrame([
             {"Concepto": "Bolsas Recurrentes Requeridas", "Valor": f"{b_c_mclf} bolsa(s) (Capacidad: {acum_c_mclf:,.0f} txns)"},
             {"Concepto": "Precio Fijo por Bolsa Recurrente", "Valor": f"${costo_bolsa_mclf:,.0f} COP (${P_base_MCLF_opt:,.2f}/txn)"},
@@ -736,7 +813,7 @@ with tab_data:
 
     with col_det2:
         st.markdown("#### Desglose Cobro Inicial (ILF + ICLF)")
-        
+
         df_init_summary = pd.DataFrame([
             {"Concepto": "Bolsas Iniciales Requeridas", "Valor": f"{b_c_iclf} bolsa(s) (Capacidad: {acum_c_iclf:,.0f} txns)"},
             {"Concepto": "Precio Fijo por Bolsa Inicial (ICLF)", "Valor": f"${costo_bolsa_ICLF_opt:,.0f} COP (${P_base_ICLF_opt:,.2f}/txn)"},
@@ -749,7 +826,7 @@ with tab_data:
 
     st.markdown("---")
     st.markdown(f"### Estructura de Bolsas Recurrentes (MCLF) - {row_c['cliente']} ({vol_c:,} txns)")
-    
+
     client_mclf_list = []
     prev_a_mclf = 0
     for b in range(1, b_c_mclf + 1):
@@ -758,7 +835,7 @@ with tab_data:
         c_mclf_total = b * costo_bolsa_mclf
         tar_ef_mclf = c_mclf_total / acum_t if acum_t > 0 else 0
         desc_p = (1 - (tar_ef_mclf / P_base_MCLF_opt)) * 100 if P_base_MCLF_opt > 0 else 0
-        
+
         client_mclf_list.append({
             "Bolsa #": f"Bolsa {b}",
             "Capacidad Txn Acumulada": int(round(acum_t)),
@@ -784,7 +861,7 @@ with tab_data:
     )
 
     st.markdown(f"### Estructura de Bolsas Iniciales (ICLF) - {row_c['cliente']} ({vol_c:,} txns)")
-    
+
     client_iclf_list = []
     prev_a_iclf = 0
     for b in range(1, b_c_iclf + 1):
@@ -793,7 +870,7 @@ with tab_data:
         c_iclf_total = b * costo_bolsa_ICLF_opt
         tar_ef_iclf = c_iclf_total / acum_t if acum_t > 0 else 0
         desc_p = (1 - (tar_ef_iclf / P_base_ICLF_opt)) * 100 if P_base_ICLF_opt > 0 else 0
-        
+
         client_iclf_list.append({
             "Bolsa #": f"Bolsa {b}",
             "Capacidad Txn Acumulada": int(round(acum_t)),
@@ -820,12 +897,12 @@ with tab_data:
 
     st.markdown("---")
     st.markdown("### Tabla de Cartera y Resultados de Simulacion")
-    
+
     cols_base = ["cliente", "producto", "año", "mes", "# txn", "valor cobrado", "Recurrente_Nuevo", "Diff_Recurrente", "Var_Pct_Recurrente", "Inicial_Simulado", "LTV_Proyectado"]
     display_cols = [c for c in cols_base if c in df_res.columns]
-    
+
     df_styled = df_res[display_cols].copy()
-    
+
     st.dataframe(
         df_styled.style.format({
             "# txn": "{:,}",
