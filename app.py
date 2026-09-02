@@ -31,11 +31,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.title("Modelador Tarifario Integrado (Analisis por Producto)")
+st.title("Simulador de modelo de precios")
 
 st.markdown("""
-Esta herramienta evalúa el impacto financiero del nuevo esquema tarifario por bolsas transaccionales sobre la cartera de clientes.
-Para garantizar la consistencia en los volúmenes y la estructura de costos, el análisis se realiza obligatoriamente producto por producto.
+Esta herramienta simula el impacto financiero del nuevo modelo de precio por bolsas transaccionales sobre los clientes actuales.
+El analisis se realiza por producto. Debe cargar el archivo con los datos de transacciones para que funcione (preguntar Juan Jose).
 """)
 
 with st.expander("Como funciona la lectura de datos y el modelo de bolsas", expanded=False):
@@ -44,12 +44,11 @@ with st.expander("Como funciona la lectura de datos y el modelo de bolsas", expa
     * **Tamaño Base de Bolsa ($T_1$):** Cantidad de transacciones incluidas en la primera bolsa comercial.
     * **Valor Fijo por Bolsa:** Cada bolsa adicional tiene exactamente el mismo costo fijo en dinero ($P_{\\text{base}} \\times T_1$).
     * **Curva Progresiva de Descuento por Volumen:** Aunque el valor en dinero por bolsa es constante, la cantidad de transacciones acomodadas dentro de cada bolsa subsecuente aumenta gradualmente. La curva parte de 0% de descuento y se aproxima hacia el descuento máximo especificado a medida que el volumen crece. alcanzando la mitad de dicho descuento máximo cuando el cliente transacciona la cantidad de transacciones fijada en $K$.
-    * **Estructura Multitemporal:** Si tu archivo incluye columnas de año y mes, puedes analizar periodos específicos o utilizar el promedio mensual consolidado por cliente.
     """)
 
-with st.expander("Idea central de la optimizacion tarifaria", expanded=False):
+with st.expander("Idea central del modelo", expanded=False):
     st.markdown("""
-    * **Parametros Gerenciales (Decisión Comercial Directa):**
+    * **Parametros Gerenciales (Decisión Comercial):**
       * Licencia Base Fija (ILF), Tarifa Mínima Garantizada (MCB), Porcentajes de Mantenimiento y Soporte (MLF y PSF).
       * Descuento Máximo ($D_{\\max}$), Curvatura de Descuento ($K$), e ICLF Objetivos para clientes pequeños y grandes.
       * Opcionalmente, el Tamaño Base de Bolsa ($T_1$) si se fija manualmente por estrategia comercial.
@@ -57,7 +56,7 @@ with st.expander("Idea central de la optimizacion tarifaria", expanded=False):
       * Tarifa Base Recurrente ($P_{\\text{base}}$) y opcionalmente el Tamaño Base ($T_1$).
     * **Objetivo de la Optimizacion:**
       * **Facilitar la entrada de clientes pequeños:** Al ofrecer tarifas iniciales y pisos de entrada moderados, se reduce la barrera de adopcion para capturar flujo recurrente de largo plazo.
-      * **Preservar el valor de clientes grandes:** Garantiza que los clientes corporativos mantengan aportes acordes a su escala de operacion, evitando la perdida de ingresos que historicamente pagaban.
+      * **Preservar el valor de clientes grandes:** Garantiza que los nuevos clientes grandes mantengan precios de entrada acordes a su escala, evitando la perdida de ingresos que historicamente sabemos que están dispuestos a pagar.
     """)
 
 def load_and_standardize_data(uploaded_file):
@@ -218,8 +217,7 @@ with st.sidebar.expander("Parametros Recurrentes (MCLF + MCB)", expanded=True):
         value=1000000, step=100000,
         help=(
             "Tarifa fija mínima mensual no negociable.\n"
-            "• Clientes cuyo cálculo por bolsas sea menor a este piso pagarán exactamente este monto.\n"
-            "• Protege la operación contra clientes inactivos o de volumen muy reducido."
+            "• Clientes cuyo cálculo por bolsas sea menor a este piso pagarán exactamente este monto."
         )
     )
 
@@ -244,13 +242,13 @@ with st.sidebar.expander("Parametros Recurrentes (MCLF + MCB)", expanded=True):
     D_max = st.slider(
         "Descuento Maximo por Volumen (D max)",
         0.05, 1.00, 0.30, 0.05,
-        help="Límite máximo teórico al que se aproxima el descuento por volumen a transacciones infinitas."
+        help="Límite máximo teórico al que se aproxima el descuento por volumen."
     )
 
     k_sens = st.slider(
         "Curvatura de Descuento (K)",
         100, 5000, 500, 100,
-        help="Es el número exacto de transacciones en el que se alcanza la mitad del descuento máximo (D max / 2)."
+        help="Es el número exacto de transacciones en el que se alcanza la mitad del descuento máximo (D max / 2). Controla que tan rapido crece el % de descuento en función del número de transacciones"
     )
 
     pct_MLF = st.slider(
