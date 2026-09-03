@@ -406,9 +406,9 @@ if optimizar_T1:
         mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
         if eval_mode == "Detalle Registros Filtrados":
             recurrentes_mensual = recurrentes_nuevos.sum() / max(1, num_meses_disponibles)
-            rev_penalty = max(0, target_rev_rec - recurrentes_mensual)**2
+            rev_penalty = (target_rev_rec - recurrentes_mensual)**2
         else:
-            rev_penalty = max(0, target_rev_rec - recurrentes_nuevos.sum())**2
+            rev_penalty = (target_rev_rec - recurrentes_nuevos.sum())**2
         return mse + 5 * rev_penalty
 
     res_rec = opt.minimize(loss_recurrente, x0=[500.0, 1000.0], method='Nelder-Mead')
@@ -432,9 +432,9 @@ else:
         mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
         if eval_mode == "Detalle Registros Filtrados":
             recurrentes_mensual = recurrentes_nuevos.sum() / max(1, num_meses_disponibles)
-            rev_penalty = max(0, target_rev_rec - recurrentes_mensual)**2
+            rev_penalty = (target_rev_rec - recurrentes_mensual)**2
         else:
-            rev_penalty = max(0, target_rev_rec - recurrentes_nuevos.sum())**2
+            rev_penalty = (target_rev_rec - recurrentes_nuevos.sum())**2
         return mse + 5 * rev_penalty
 
     res_rec = opt.minimize(loss_recurrente_fixed_t1, x0=[500.0], method='Nelder-Mead')
@@ -564,7 +564,10 @@ df_res["ILF_Nuevo"] = ILF_base_param
 df_res["ICLF_Nuevo"] = df_res["# txn"].apply(lambda v: calc_iclf_cliente(v, P_base_ICLF_opt, T1_opt_ICLF, D_max_ICLF, k_sens_ICLF))
 df_res["Inicial_Simulado"] = df_res["ILF_Nuevo"] + df_res["ICLF_Nuevo"]
 
-rev_nueva_total = df_res['Recurrente_Nuevo'].sum()
+if eval_mode == "Detalle Registros Filtrados":
+    rev_nueva_total = df_res['Recurrente_Nuevo'].sum() / max(1, num_meses_disponibles)
+else:
+    rev_nueva_total = df_res['Recurrente_Nuevo'].sum()
 diff_total = rev_nueva_total - rev_actual_total
 pct_variacion_total = (diff_total / max(1.0, rev_actual_total)) * 100.0
 
