@@ -278,16 +278,6 @@ with st.sidebar.expander("Parametros Recurrentes (MCLF + MCB)", expanded=True):
 
     st.markdown("---")
     st.markdown("**Pesos de la Funcion de Perdida (MCLF)**")
-    peso_centrado = st.slider(
-        "Centrado en cero (diferencia media por cliente)",
-        0.0, 5.0, 1.0, 0.1,
-        help=(
-            "Penaliza que la diferencia media entre modelo nuevo y actual por cliente sea distinta de 0.\n"
-            "• Alto (>=2): Evita sobre/sub-cobro sistematico del modelo.\n"
-            "• Bajo (<=0.5): Permite sesgos si el optimizador los prefiere para mejorar el ajuste global."
-        )
-    )
-
     peso_recaudo = st.slider(
         "Peso meta de recaudo global",
         0.0, 10.0, 1.0, 0.1,
@@ -424,7 +414,7 @@ else:
     num_meses_disponibles = 0
 target_rev_rec = rev_actual_total * Rev_target_pct
 
-def loss_recurrente(params, opt_T1, T1_fijo, opt_DK, D_max_fijo, k_fijo, w_centrado, w_recaudo):
+def loss_recurrente(params, opt_T1, T1_fijo, opt_DK, D_max_fijo, k_fijo, w_recaudo):
     try:
         p = list(params)
         P_base = float(p.pop(0))
@@ -454,16 +444,13 @@ def loss_recurrente(params, opt_T1, T1_fijo, opt_DK, D_max_fijo, k_fijo, w_centr
     diffs_rel = (recurrentes_nuevos - valores_actuales) / denom_cliente
     mse_rel = float(np.mean(diffs_rel**2))
 
-    mean_diff = float(np.mean(recurrentes_nuevos - valores_actuales))
-    mean_penalty_rel = (mean_diff / max(1.0, float(np.mean(valores_actuales))))**2
-
     if eval_mode == "Detalle Registros Filtrados":
         rev_sim = float(recurrentes_nuevos.sum() / max(1, num_meses_disponibles))
     else:
         rev_sim = float(recurrentes_nuevos.sum())
     rev_penalty_rel = ((target_rev_rec - rev_sim) / max(1.0, target_rev_rec))**2
 
-    return mse_rel + w_centrado * mean_penalty_rel + w_recaudo * rev_penalty_rel
+    return mse_rel + w_recaudo * rev_penalty_rel
 
 x0 = [500.0]
 if optimizar_T1:
@@ -474,7 +461,7 @@ if optimizar_Dmax_K:
 
 res_rec = opt.minimize(
     loss_recurrente, x0=x0, method='Nelder-Mead',
-    args=(optimizar_T1, T1_fijo_user, optimizar_Dmax_K, D_max, k_sens, peso_centrado, peso_recaudo),
+    args=(optimizar_T1, T1_fijo_user, optimizar_Dmax_K, D_max, k_sens, peso_recaudo),
     options={'xatol': 1e-2, 'fatol': 1e-4, 'maxiter': 1000, 'disp': False}
 )
 
