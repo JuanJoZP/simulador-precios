@@ -399,16 +399,17 @@ if optimizar_T1:
         for _, row in df_work.iterrows():
             mclf = calc_mclf_cliente(row["# txn"], P_base, T1, D_max, k_sens)
             mlf_psf = ILF_base_param * (pct_MLF + pct_PSF)
-            recurrentes_nuevos.append(mclf + mlf_psf)
+            tot = max(MCB_piso, mclf + mlf_psf)
+            recurrentes_nuevos.append(tot)
 
         recurrentes_nuevos = np.array(recurrentes_nuevos)
-        mse_rel = np.mean(((recurrentes_nuevos - df_work["valor cobrado"]) / np.maximum(1.0, df_work["valor cobrado"]))**2)
+        mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
         if eval_mode == "Detalle Registros Filtrados":
             recurrentes_mensual = recurrentes_nuevos.sum() / max(1, num_meses_disponibles)
+            rev_penalty = (target_rev_rec - recurrentes_mensual)**2
         else:
-            recurrentes_mensual = recurrentes_nuevos.sum()
-        rev_penalty_rel = ((recurrentes_mensual - target_rev_rec) / max(1.0, target_rev_rec))**2
-        return mse_rel + rev_penalty_rel
+            rev_penalty = (target_rev_rec - recurrentes_nuevos.sum())**2
+        return mse + 5 * rev_penalty
 
     res_rec = opt.minimize(loss_recurrente, x0=[500.0, 1000.0], method='Nelder-Mead')
     P_base_MCLF_opt = max(10.0, res_rec.x[0])
@@ -424,16 +425,17 @@ else:
         for _, row in df_work.iterrows():
             mclf = calc_mclf_cliente(row["# txn"], P_base, T1, D_max, k_sens)
             mlf_psf = ILF_base_param * (pct_MLF + pct_PSF)
-            recurrentes_nuevos.append(mclf + mlf_psf)
+            tot = max(MCB_piso, mclf + mlf_psf)
+            recurrentes_nuevos.append(tot)
 
         recurrentes_nuevos = np.array(recurrentes_nuevos)
-        mse_rel = np.mean(((recurrentes_nuevos - df_work["valor cobrado"]) / np.maximum(1.0, df_work["valor cobrado"]))**2)
+        mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
         if eval_mode == "Detalle Registros Filtrados":
             recurrentes_mensual = recurrentes_nuevos.sum() / max(1, num_meses_disponibles)
+            rev_penalty = (target_rev_rec - recurrentes_mensual)**2
         else:
-            recurrentes_mensual = recurrentes_nuevos.sum()
-        rev_penalty_rel = ((recurrentes_mensual - target_rev_rec) / max(1.0, target_rev_rec))**2
-        return mse_rel + rev_penalty_rel
+            rev_penalty = (target_rev_rec - recurrentes_nuevos.sum())**2
+        return mse + 5 * rev_penalty
 
     res_rec = opt.minimize(loss_recurrente_fixed_t1, x0=[500.0], method='Nelder-Mead')
     P_base_MCLF_opt = max(10.0, res_rec.x[0])
