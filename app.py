@@ -311,7 +311,13 @@ def calc_num_bolsas(vol, T1, Dmax, k):
         acum = calc_bolsa_acum(b, T1, Dmax, k)
     return b, acum
 
-rev_actual_total = df_work["valor cobrado"].sum()
+if len(df_filtered_time) > 0:
+    _monthly_totals = df_filtered_time.groupby(["año", "mes"])["valor cobrado"].sum()
+    rev_actual_total = float(_monthly_totals.mean())
+    num_meses_disponibles = int(_monthly_totals.shape[0])
+else:
+    rev_actual_total = 0.0
+    num_meses_disponibles = 0
 target_rev_rec = rev_actual_total * Rev_target_pct
 
 if optimizar_T1:
@@ -329,7 +335,11 @@ if optimizar_T1:
 
         recurrentes_nuevos = np.array(recurrentes_nuevos)
         mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
-        rev_penalty = max(0, target_rev_rec - recurrentes_nuevos.sum())**2
+        if eval_mode == "Detalle Registros Filtrados":
+            recurrentes_mensual = recurrentes_nuevos.sum() / max(1, num_meses_disponibles)
+            rev_penalty = max(0, target_rev_rec - recurrentes_mensual)**2
+        else:
+            rev_penalty = max(0, target_rev_rec - recurrentes_nuevos.sum())**2
         return mse + 5 * rev_penalty
 
     res_rec = opt.minimize(loss_recurrente, x0=[500.0, 1000.0], method='Nelder-Mead')
@@ -351,7 +361,11 @@ else:
 
         recurrentes_nuevos = np.array(recurrentes_nuevos)
         mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
-        rev_penalty = max(0, target_rev_rec - recurrentes_nuevos.sum())**2
+        if eval_mode == "Detalle Registros Filtrados":
+            recurrentes_mensual = recurrentes_nuevos.sum() / max(1, num_meses_disponibles)
+            rev_penalty = max(0, target_rev_rec - recurrentes_mensual)**2
+        else:
+            rev_penalty = max(0, target_rev_rec - recurrentes_nuevos.sum())**2
         return mse + 5 * rev_penalty
 
     res_rec = opt.minimize(loss_recurrente_fixed_t1, x0=[500.0], method='Nelder-Mead')
