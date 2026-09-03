@@ -182,19 +182,24 @@ if mes_sel != "TODOS":
 st.sidebar.markdown("---")
 eval_mode = st.sidebar.radio(
     "Modo de Evaluacion Recurrente",
-    ["Promedio Mensual por Cliente", "Detalle Registros Filtrados"],
-    help="Promedio Mensual por Cliente consolida el histórico de cada empresa a una tarifa mensual representativa."
+    ["Ultimo Mes por Cliente", "Detalle Registros Filtrados"],
+    help=(
+        "Ultimo Mes por Cliente: usa el mes mas reciente facturado de cada empresa como representativo, "
+        "para que clientes con mas meses de historial no pesen mas en la optimizacion.\n"
+        "Detalle Registros Filtrados: evalua cada registro individual (cliente x año x mes) por separado."
+    )
 )
 
-if eval_mode == "Promedio Mensual por Cliente":
-    df_work = df_filtered_time.groupby(["cliente", "producto"]).agg(
+if eval_mode == "Ultimo Mes por Cliente":
+    df_filtered_time_sorted = df_filtered_time.sort_values(["cliente", "producto", "año", "mes"])
+    df_work = df_filtered_time_sorted.groupby(["cliente", "producto"]).agg(
         num_meses_historial=("mes", "nunique"),
-        txns_mean=("# txn", "mean"),
-        valor_cobrado=("valor cobrado", "mean"),
-        año=("año", "max"),
-        mes=("mes", "max")
+        año=("año", "last"),
+        mes=("mes", "last"),
+        txns_last=("# txn", "last"),
+        valor_cobrado=("valor cobrado", "last")
     ).reset_index()
-    df_work["# txn"] = df_work["txns_mean"].astype(int)
+    df_work["# txn"] = df_work["txns_last"].astype(int)
     df_work["valor cobrado"] = df_work["valor_cobrado"]
 else:
     df_work = df_filtered_time.copy().reset_index(drop=True)
