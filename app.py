@@ -326,31 +326,59 @@ with st.sidebar.expander("Parametros de Entrada (ILF + ICLF)", expanded=True):
 
 def calc_bolsa_acum(b_idx, T1, Dmax, k):
     """Calcula las transacciones acumuladas alcanzadas hasta la bolsa b_idx."""
-    d_eff = min(Dmax, 0.999)
-    val = (T1 * b_idx - k) + np.sqrt((T1 * b_idx - k)**2 + 4 * (1 - d_eff) * k * T1 * b_idx)
-    return val / (2 - 2 * d_eff)
+    if b_idx is None or T1 is None or Dmax is None or k is None:
+        return 0.0
+    try:
+        T1 = float(T1); Dmax = float(Dmax); k = float(k); b_idx = float(b_idx)
+        if b_idx <= 0 or T1 <= 0 or k <= 0:
+            return 0.0
+        d_eff = min(max(Dmax, 0.0), 0.999)
+        with np.errstate(over='ignore', invalid='ignore', divide='ignore'):
+            radicand = (T1 * b_idx - k)**2 + 4.0 * (1.0 - d_eff) * k * T1 * b_idx
+            val = (T1 * b_idx - k) + np.sqrt(max(0.0, radicand))
+            denom = 2.0 - 2.0 * d_eff
+            if denom <= 0:
+                return float('inf')
+            result = val / denom
+        if not np.isfinite(result):
+            return 0.0
+        return float(result)
+    except (ValueError, TypeError, FloatingPointError, OverflowError):
+        return 0.0
 
 def calc_mclf_cliente(vol, P_base, T1, Dmax, k):
     """Calcula el cobro recurrente por bolsas para un volumen determinado."""
-    if vol <= 0:
+    if vol is None or vol <= 0 or P_base is None or T1 is None:
         return 0.0
-    b = 1
-    acum = calc_bolsa_acum(b, T1, Dmax, k)
-    while acum < vol and b < 300:
-        b += 1
+    try:
+        P_base = float(P_base); T1 = float(T1); Dmax = float(Dmax); k = float(k)
+        if P_base <= 0 or T1 <= 0:
+            return 0.0
+        b = 1
         acum = calc_bolsa_acum(b, T1, Dmax, k)
-    return b * (P_base * T1)
+        while acum < vol and b < 300:
+            b += 1
+            acum = calc_bolsa_acum(b, T1, Dmax, k)
+        return b * (P_base * T1)
+    except (ValueError, TypeError, FloatingPointError, OverflowError):
+        return 0.0
 
 def calc_num_bolsas(vol, T1, Dmax, k):
     """Calcula el número exacto de bolsas necesarias y la capacidad total alcanzada."""
-    if vol <= 0:
+    if vol is None or vol <= 0 or T1 is None:
         return 0, 0.0
-    b = 1
-    acum = calc_bolsa_acum(b, T1, Dmax, k)
-    while acum < vol and b < 300:
-        b += 1
+    try:
+        T1 = float(T1); Dmax = float(Dmax); k = float(k)
+        if T1 <= 0:
+            return 0, 0.0
+        b = 1
         acum = calc_bolsa_acum(b, T1, Dmax, k)
-    return b, acum
+        while acum < vol and b < 300:
+            b += 1
+            acum = calc_bolsa_acum(b, T1, Dmax, k)
+        return b, acum
+    except (ValueError, TypeError, FloatingPointError, OverflowError):
+        return 0, 0.0
 
 if len(df_filtered_time) > 0:
     _monthly_totals = df_filtered_time.groupby(["año", "mes"])["valor cobrado"].sum()
@@ -421,25 +449,66 @@ vol_max = max(1, int(df_work["# txn"].max())) if len(df_work) > 0 else 1
 if optimizar_T1_ICLF:
     def loss_inicial(params):
         P_base, T1 = params
+        try:
+            P_base = float(P_base); T1 = float(T1)
+        except (ValueError, TypeError):
+            return 1e15
+        if not (np.isfinite(P_base) and np.isfinite(T1)):
+            return 1e15
+        P_base = max(1.0, min(P_base, 1e7))
+        T1 = max(10.0, min(T1, 1e6))
         if P_base <= 0 or T1 <= 1:
             return 1e15
 
-        iclf_min_sim = calc_iclf_cliente(vol_min, P_base, T1, D_max_ICLF, k_sens_ICLF)
-        iclf_max_sim = calc_iclf_cliente(vol_max, P_base, T1, D_max_ICLF, k_sens_ICLF)
+        try:
+            iclf_min_sim = calc_iclf_cliente(vol_min, P_base, T1, D_max_ICLF, k_sens_ICLF)
+            iclf_max_sim = calc_iclf_cliente(vol_max, P_base, T1, D_max_ICLF, k_sens_ICLF)
+        except (ValueError, TypeError, FloatingPointError, OverflowError):
+            return 1e15
+
+        if not (np.isfinite(iclf_min_sim) and np.isfinite(iclf_max_sim)):
+            return 1e15
         if iclf_min_sim <= 0 or iclf_max_sim <= 0:
             return 1e15
 
         err_min = ((iclf_min_sim - ICLF_target_small) / max(1.0, ICLF_target_small)) ** 2
         err_max = ((iclf_max_sim - ICLF_target_large) / max(1.0, ICLF_target_large)) ** 2
+        if not np.isfinite(err_min + err_max):
+            return 1e15
         return err_min + err_max
 
-    _init_b_max_iclf, _ = calc_num_bolsas(vol_max, 1000.0, D_max_ICLF, k_sens_ICLF)
-    _init_b_max_iclf = max(1, _init_b_max_iclf)
+    try:
+        _init_b_max_iclf, _ = calc_num_bolsas(vol_max, 1000.0, D_max_ICLF, k_sens_ICLF)
+    except (ValueError, TypeError, FloatingPointError, OverflowError):
+        _init_b_max_iclf = 1
+    _init_b_max_iclf = max(1, int(_init_b_max_iclf) if _init_b_max_iclf else 1)
     _P_base_init_iclf = ICLF_target_large / (_init_b_max_iclf * 1000.0) if _init_b_max_iclf > 0 else 500.0
+    _P_base_init_iclf = float(np.clip(_P_base_init_iclf, 1.0, 1e7))
 
-    res_iclf = opt.minimize(loss_inicial, x0=[_P_base_init_iclf, 1000.0], method='Nelder-Mead')
-    P_base_ICLF_opt = max(10.0, res_iclf.x[0])
-    T1_opt_ICLF = max(10.0, res_iclf.x[1])
+    try:
+        res_iclf = opt.minimize(
+            loss_inicial,
+            x0=[_P_base_init_iclf, 1000.0],
+            method='Nelder-Mead',
+            options={'xatol': 1e-2, 'fatol': 1e-6, 'maxiter': 500, 'disp': False}
+        )
+    except (ValueError, TypeError, FloatingPointError, OverflowError):
+        res_iclf = None
+
+    if res_iclf is not None and hasattr(res_iclf, 'x') and len(res_iclf.x) >= 2:
+        try:
+            _p0 = float(res_iclf.x[0]); _t1 = float(res_iclf.x[1])
+            if np.isfinite(_p0) and np.isfinite(_t1):
+                P_base_ICLF_opt = max(10.0, _p0)
+                T1_opt_ICLF = max(10.0, _t1)
+            else:
+                raise ValueError("non-finite opt result")
+        except (ValueError, TypeError, FloatingPointError, OverflowError):
+            P_base_ICLF_opt = max(10.0, _P_base_init_iclf)
+            T1_opt_ICLF = 1000.0
+    else:
+        P_base_ICLF_opt = max(10.0, _P_base_init_iclf)
+        T1_opt_ICLF = 1000.0
     costo_bolsa_ICLF_opt = P_base_ICLF_opt * T1_opt_ICLF
 else:
     T1_opt_ICLF = float(T1_fijo_user_ICLF)
@@ -450,10 +519,18 @@ else:
 
 def calc_iclf_cliente(vol, P_base_iclf, T1, Dmax, k):
     """Calcula el cobro por capacidad inicial (ICLF) estrictamente por el número de bolsas requeridas."""
-    if vol <= 0:
+    if vol is None or vol <= 0 or P_base_iclf is None or T1 is None:
         return 0.0
-    b, _ = calc_num_bolsas(vol, T1, Dmax, k)
-    return b * (P_base_iclf * T1)
+    try:
+        P_base_iclf = float(P_base_iclf); T1 = float(T1); Dmax = float(Dmax); k = float(k)
+        if P_base_iclf <= 0 or T1 <= 0:
+            return 0.0
+        b, _ = calc_num_bolsas(vol, T1, Dmax, k)
+        if b is None or b < 0:
+            return 0.0
+        return float(b) * (P_base_iclf * T1)
+    except (ValueError, TypeError, FloatingPointError, OverflowError):
+        return 0.0
 
 df_res = df_work.copy()
 
