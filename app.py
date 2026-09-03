@@ -399,8 +399,7 @@ if optimizar_T1:
         for _, row in df_work.iterrows():
             mclf = calc_mclf_cliente(row["# txn"], P_base, T1, D_max, k_sens)
             mlf_psf = ILF_base_param * (pct_MLF + pct_PSF)
-            tot = max(MCB_piso, mclf + mlf_psf)
-            recurrentes_nuevos.append(tot)
+            recurrentes_nuevos.append(mclf + mlf_psf)
 
         recurrentes_nuevos = np.array(recurrentes_nuevos)
         mse_rel = np.mean(((recurrentes_nuevos - df_work["valor cobrado"]) / np.maximum(1.0, df_work["valor cobrado"]))**2)
@@ -425,8 +424,7 @@ else:
         for _, row in df_work.iterrows():
             mclf = calc_mclf_cliente(row["# txn"], P_base, T1, D_max, k_sens)
             mlf_psf = ILF_base_param * (pct_MLF + pct_PSF)
-            tot = max(MCB_piso, mclf + mlf_psf)
-            recurrentes_nuevos.append(tot)
+            recurrentes_nuevos.append(mclf + mlf_psf)
 
         recurrentes_nuevos = np.array(recurrentes_nuevos)
         mse_rel = np.mean(((recurrentes_nuevos - df_work["valor cobrado"]) / np.maximum(1.0, df_work["valor cobrado"]))**2)
