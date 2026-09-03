@@ -447,11 +447,18 @@ vol_min = max(1, int(df_work["# txn"].min())) if len(df_work) > 0 else 1
 vol_max = max(1, int(df_work["# txn"].max())) if len(df_work) > 0 else 1
 
 if optimizar_T1_ICLF:
-    def loss_inicial(params):
-        P_base, T1 = params
+    _vol_min_iclf = int(vol_min)
+    _vol_max_iclf = int(vol_max)
+    _dmax_iclf = float(D_max_ICLF)
+    _k_iclf = float(k_sens_ICLF)
+    _iclf_t_small = float(ICLF_target_small)
+    _iclf_t_large = float(ICLF_target_large)
+
+    def loss_inicial(params, _vmn=_vol_min_iclf, _vmx=_vol_max_iclf, _dm=_dmax_iclf, _k=_k_iclf, _ts=_iclf_t_small, _tl=_iclf_t_large):
         try:
+            P_base, T1 = params[0], params[1]
             P_base = float(P_base); T1 = float(T1)
-        except (ValueError, TypeError):
+        except (ValueError, TypeError, IndexError, KeyError, AttributeError):
             return 1e15
         if not (np.isfinite(P_base) and np.isfinite(T1)):
             return 1e15
@@ -461,9 +468,9 @@ if optimizar_T1_ICLF:
             return 1e15
 
         try:
-            iclf_min_sim = calc_iclf_cliente(vol_min, P_base, T1, D_max_ICLF, k_sens_ICLF)
-            iclf_max_sim = calc_iclf_cliente(vol_max, P_base, T1, D_max_ICLF, k_sens_ICLF)
-        except (ValueError, TypeError, FloatingPointError, OverflowError):
+            iclf_min_sim = calc_iclf_cliente(_vmn, P_base, T1, _dm, _k)
+            iclf_max_sim = calc_iclf_cliente(_vmx, P_base, T1, _dm, _k)
+        except Exception:
             return 1e15
 
         if not (np.isfinite(iclf_min_sim) and np.isfinite(iclf_max_sim)):
@@ -471,20 +478,31 @@ if optimizar_T1_ICLF:
         if iclf_min_sim <= 0 or iclf_max_sim <= 0:
             return 1e15
 
-        err_min = ((iclf_min_sim - ICLF_target_small) / max(1.0, ICLF_target_small)) ** 2
-        err_max = ((iclf_max_sim - ICLF_target_large) / max(1.0, ICLF_target_large)) ** 2
-        if not np.isfinite(err_min + err_max):
+        try:
+            err_min = ((iclf_min_sim - _ts) / max(1.0, _ts)) ** 2
+            err_max = ((iclf_max_sim - _tl) / max(1.0, _tl)) ** 2
+            total = err_min + err_max
+        except Exception:
             return 1e15
-        return err_min + err_max
+        if not np.isfinite(total):
+            return 1e15
+        return total
 
     try:
-        _init_b_max_iclf, _ = calc_num_bolsas(vol_max, 1000.0, D_max_ICLF, k_sens_ICLF)
-    except (ValueError, TypeError, FloatingPointError, OverflowError):
+        _init_b_max_iclf, _ = calc_num_bolsas(_vol_max_iclf, 1000.0, _dmax_iclf, _k_iclf)
+    except Exception:
         _init_b_max_iclf = 1
-    _init_b_max_iclf = max(1, int(_init_b_max_iclf) if _init_b_max_iclf else 1)
-    _P_base_init_iclf = ICLF_target_large / (_init_b_max_iclf * 1000.0) if _init_b_max_iclf > 0 else 500.0
-    _P_base_init_iclf = float(np.clip(_P_base_init_iclf, 1.0, 1e7))
+    try:
+        _init_b_max_iclf = max(1, int(_init_b_max_iclf) if _init_b_max_iclf else 1)
+    except Exception:
+        _init_b_max_iclf = 1
+    try:
+        _P_base_init_iclf = _iclf_t_large / (_init_b_max_iclf * 1000.0) if _init_b_max_iclf > 0 else 500.0
+        _P_base_init_iclf = float(np.clip(_P_base_init_iclf, 1.0, 1e7))
+    except Exception:
+        _P_base_init_iclf = 500.0
 
+    res_iclf = None
     try:
         res_iclf = opt.minimize(
             loss_inicial,
@@ -492,24 +510,25 @@ if optimizar_T1_ICLF:
             method='Nelder-Mead',
             options={'xatol': 1e-2, 'fatol': 1e-6, 'maxiter': 500, 'disp': False}
         )
-    except (ValueError, TypeError, FloatingPointError, OverflowError):
+    except Exception:
         res_iclf = None
 
-    if res_iclf is not None and hasattr(res_iclf, 'x') and len(res_iclf.x) >= 2:
+    P_base_ICLF_opt = max(10.0, _P_base_init_iclf)
+    T1_opt_ICLF = 1000.0
+    if res_iclf is not None and hasattr(res_iclf, 'x'):
         try:
-            _p0 = float(res_iclf.x[0]); _t1 = float(res_iclf.x[1])
-            if np.isfinite(_p0) and np.isfinite(_t1):
-                P_base_ICLF_opt = max(10.0, _p0)
-                T1_opt_ICLF = max(10.0, _t1)
-            else:
-                raise ValueError("non-finite opt result")
-        except (ValueError, TypeError, FloatingPointError, OverflowError):
-            P_base_ICLF_opt = max(10.0, _P_base_init_iclf)
-            T1_opt_ICLF = 1000.0
-    else:
-        P_base_ICLF_opt = max(10.0, _P_base_init_iclf)
-        T1_opt_ICLF = 1000.0
-    costo_bolsa_ICLF_opt = P_base_ICLF_opt * T1_opt_ICLF
+            _xarr = list(res_iclf.x)
+            if len(_xarr) >= 2:
+                _p0 = float(_xarr[0]); _t1v = float(_xarr[1])
+                if np.isfinite(_p0) and np.isfinite(_t1v):
+                    P_base_ICLF_opt = max(10.0, _p0)
+                    T1_opt_ICLF = max(10.0, _t1v)
+        except Exception:
+            pass
+    try:
+        costo_bolsa_ICLF_opt = P_base_ICLF_opt * T1_opt_ICLF
+    except Exception:
+        costo_bolsa_ICLF_opt = max(1.0, P_base_ICLF_opt * 1000.0)
 else:
     T1_opt_ICLF = float(T1_fijo_user_ICLF)
     b_max_iclf, _ = calc_num_bolsas(vol_max, T1_opt_ICLF, D_max_ICLF, k_sens_ICLF)
