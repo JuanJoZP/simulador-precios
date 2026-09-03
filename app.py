@@ -283,6 +283,47 @@ with st.sidebar.expander("Parametros de Entrada (ILF + ICLF)", expanded=True):
         help="Meta de cobro inicial por capacidad (ICLF) para el cliente de mayor volumen de la cartera."
     )
 
+    st.markdown("---")
+    st.markdown("**Parametros de Descuento ICLF (Independientes del MCLF)**")
+
+    D_max_ICLF = st.slider(
+        "Descuento Maximo ICLF (D max ICLF)",
+        0.05, 1.00, 0.30, 0.05,
+        help=(
+            "Límite máximo teórico al que se aproxima el descuento por volumen para el modelo ICLF.\n"
+            "• Es independiente del D max del MCLF: puedes definir una agresividad comercial distinta para el setup inicial.\n"
+            "• Al subir este %: las bolsas iniciales son mas largas (cobran igual pero cubren mas txns) para clientes grandes."
+        )
+    )
+
+    k_sens_ICLF = st.slider(
+        "Curvatura de Descuento ICLF (K ICLF)",
+        100, 5000, 500, 100,
+        help=(
+            "Numero exacto de transacciones en el que se alcanza la mitad del descuento maximo D max ICLF / 2.\n"
+            "• Es independiente de la curvatura K del MCLF.\n"
+            "• Al subir este K: el descuento por volumen crece mas lentamente (curva mas plana)."
+        )
+    )
+
+    optimizar_T1_ICLF = st.checkbox(
+        "Optimizar tamaño base de bolsa ICLF (T1 ICLF) libremente",
+        value=True,
+        help=(
+            "• Activado: El modelo busca matemáticamente la combinación idónea de T1 ICLF y Tarifa Base ICLF.\n"
+            "• Desactivado: Defines un T1 ICLF fijo por estrategia comercial y el modelo optimiza solo la Tarifa Base ICLF."
+        )
+    )
+
+    if not optimizar_T1_ICLF:
+        T1_fijo_user_ICLF = st.number_input(
+            "Tamaño Base de Bolsa ICLF Fijo (T1 ICLF txns)",
+            value=1000, min_value=10, step=100,
+            help="Capacidad fija asignada a la primera bolsa ICLF por decisión comercial."
+        )
+    else:
+        T1_fijo_user_ICLF = 1000
+
 def calc_bolsa_acum(b_idx, T1, Dmax, k):
     """Calcula las transacciones acumuladas alcanzadas hasta la bolsa b_idx."""
     d_eff = min(Dmax, 0.999)
@@ -374,10 +415,38 @@ else:
 
 costo_bolsa_mclf = P_base_MCLF_opt * T1_opt
 
-vol_max = max(1, df_work["# txn"].max())
-b_max_iclf, _ = calc_num_bolsas(vol_max, T1_opt, D_max, k_sens)
-costo_bolsa_ICLF_opt = ICLF_target_large / max(1, b_max_iclf)
-P_base_ICLF_opt = costo_bolsa_ICLF_opt / T1_opt if T1_opt > 0 else 0.0
+vol_min = max(1, int(df_work["# txn"].min())) if len(df_work) > 0 else 1
+vol_max = max(1, int(df_work["# txn"].max())) if len(df_work) > 0 else 1
+
+if optimizar_T1_ICLF:
+    def loss_inicial(params):
+        P_base, T1 = params
+        if P_base <= 0 or T1 <= 1:
+            return 1e15
+
+        iclf_min_sim = calc_iclf_cliente(vol_min, P_base, T1, D_max_ICLF, k_sens_ICLF)
+        iclf_max_sim = calc_iclf_cliente(vol_max, P_base, T1, D_max_ICLF, k_sens_ICLF)
+        if iclf_min_sim <= 0 or iclf_max_sim <= 0:
+            return 1e15
+
+        err_min = ((iclf_min_sim - ICLF_target_small) / max(1.0, ICLF_target_small)) ** 2
+        err_max = ((iclf_max_sim - ICLF_target_large) / max(1.0, ICLF_target_large)) ** 2
+        return err_min + err_max
+
+    _init_b_max_iclf, _ = calc_num_bolsas(vol_max, 1000.0, D_max_ICLF, k_sens_ICLF)
+    _init_b_max_iclf = max(1, _init_b_max_iclf)
+    _P_base_init_iclf = ICLF_target_large / (_init_b_max_iclf * 1000.0) if _init_b_max_iclf > 0 else 500.0
+
+    res_iclf = opt.minimize(loss_inicial, x0=[_P_base_init_iclf, 1000.0], method='Nelder-Mead')
+    P_base_ICLF_opt = max(10.0, res_iclf.x[0])
+    T1_opt_ICLF = max(10.0, res_iclf.x[1])
+    costo_bolsa_ICLF_opt = P_base_ICLF_opt * T1_opt_ICLF
+else:
+    T1_opt_ICLF = float(T1_fijo_user_ICLF)
+    b_max_iclf, _ = calc_num_bolsas(vol_max, T1_opt_ICLF, D_max_ICLF, k_sens_ICLF)
+    b_max_iclf_eff = max(1, b_max_iclf)
+    costo_bolsa_ICLF_opt = ICLF_target_large / b_max_iclf_eff
+    P_base_ICLF_opt = costo_bolsa_ICLF_opt / T1_opt_ICLF if T1_opt_ICLF > 0 else 0.0
 
 def calc_iclf_cliente(vol, P_base_iclf, T1, Dmax, k):
     """Calcula el cobro por capacidad inicial (ICLF) estrictamente por el número de bolsas requeridas."""
@@ -396,7 +465,7 @@ df_res["Var_Pct_Recurrente"] = (df_res["Diff_Recurrente"] / np.maximum(1.0, df_r
 df_res["En_Piso_MCB"] = df_res["Recurrente_Nuevo"] == MCB_piso
 
 df_res["ILF_Nuevo"] = ILF_base_param
-df_res["ICLF_Nuevo"] = df_res["# txn"].apply(lambda v: calc_iclf_cliente(v, P_base_ICLF_opt, T1_opt, D_max, k_sens))
+df_res["ICLF_Nuevo"] = df_res["# txn"].apply(lambda v: calc_iclf_cliente(v, P_base_ICLF_opt, T1_opt_ICLF, D_max_ICLF, k_sens_ICLF))
 df_res["Inicial_Simulado"] = df_res["ILF_Nuevo"] + df_res["ICLF_Nuevo"]
 
 rev_nueva_total = df_res['Recurrente_Nuevo'].sum()
@@ -665,7 +734,7 @@ with tab_init:
     bolsas_iclf_list = []
     prev_acum_iclf = 0
     for b in range(1, 11):
-        acum_txns = calc_bolsa_acum(b, T1_opt, D_max, k_sens)
+        acum_txns = calc_bolsa_acum(b, T1_opt_ICLF, D_max_ICLF, k_sens_ICLF)
         txns_en_bolsa = acum_txns - prev_acum_iclf
         costo_total_iclf = b * costo_bolsa_ICLF_opt
         tarifa_efectiva = costo_total_iclf / acum_txns if acum_txns > 0 else 0
@@ -763,7 +832,7 @@ with tab_data:
     vol_c = row_c["# txn"]
 
     b_c_mclf, acum_c_mclf = calc_num_bolsas(vol_c, T1_opt, D_max, k_sens)
-    b_c_iclf, acum_c_iclf = calc_num_bolsas(vol_c, T1_opt, D_max, k_sens)
+    b_c_iclf, acum_c_iclf = calc_num_bolsas(vol_c, T1_opt_ICLF, D_max_ICLF, k_sens_ICLF)
 
     mclf_c = row_c["MCLF_Nuevo"]
     mlf_psf_c = row_c["MLF_PSF"]
@@ -842,7 +911,7 @@ with tab_data:
     client_iclf_list = []
     prev_a_iclf = 0
     for b in range(1, b_c_iclf + 1):
-        acum_t = calc_bolsa_acum(b, T1_opt, D_max, k_sens)
+        acum_t = calc_bolsa_acum(b, T1_opt_ICLF, D_max_ICLF, k_sens_ICLF)
         txns_b = acum_t - prev_a_iclf
         c_iclf_total = b * costo_bolsa_ICLF_opt
         tar_ef_iclf = c_iclf_total / acum_t if acum_t > 0 else 0
