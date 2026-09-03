@@ -288,7 +288,7 @@ with st.sidebar.expander("Parametros de Entrada (ILF + ICLF)", expanded=True):
 
     D_max_ICLF = st.slider(
         "Descuento Maximo ICLF (D max ICLF)",
-        0.05, 1.00, 0.30, 0.05,
+        0.05, 1.00, 0.30, 0.01,
         help=(
             "Límite máximo teórico al que se aproxima el descuento por volumen para el modelo ICLF.\n"
             "• Es independiente del D max del MCLF: puedes definir una agresividad comercial distinta para el setup inicial.\n"
@@ -298,7 +298,7 @@ with st.sidebar.expander("Parametros de Entrada (ILF + ICLF)", expanded=True):
 
     k_sens_ICLF = st.slider(
         "Curvatura de Descuento ICLF (K ICLF)",
-        100, 5000, 500, 100,
+        100, 10000, 500, 100,
         help=(
             "Numero exacto de transacciones en el que se alcanza la mitad del descuento maximo D max ICLF / 2.\n"
             "• Es independiente de la curvatura K del MCLF.\n"
