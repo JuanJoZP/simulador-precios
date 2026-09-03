@@ -247,7 +247,7 @@ with st.sidebar.expander("Parametros Recurrentes (MCLF + MCB)", expanded=True):
 
     k_sens = st.slider(
         "Curvatura de Descuento (K)",
-        100, 5000, 500, 100,
+        1, 10, 5, 1,
         help="Es el número exacto de transacciones en el que se alcanza la mitad del descuento máximo (D max / 2). Controla que tan rapido crece el % de descuento en función del número de transacciones"
     )
 
