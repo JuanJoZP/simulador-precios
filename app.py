@@ -239,6 +239,15 @@ with st.sidebar.expander("Parametros Recurrentes (MCLF + MCB)", expanded=True):
     else:
         T1_fijo_user = 1000
 
+    optimizar_Dmax_K = st.checkbox(
+        "Optimizar Descuento Maximo (D max) y Curvatura (K) libremente",
+        value=False,
+        help=(
+            "• Activado: El optimizador ajusta D max y K además de T1 y Tarifa Base buscando el mejor ajuste al recaudo.\n"
+            "• Desactivado: Usa los valores fijos definidos en los sliders siguientes como anclas comerciales."
+        )
+    )
+
     D_max = st.slider(
         "Descuento Maximo por Volumen (D max)",
         0.05, 1.00, 0.30, 0.05,
@@ -389,57 +398,60 @@ else:
     num_meses_disponibles = 0
 target_rev_rec = rev_actual_total * Rev_target_pct
 
+def loss_recurrente(params, opt_T1, T1_fijo, opt_DK, D_max_fijo, k_fijo):
+    try:
+        p = list(params)
+        P_base = float(p.pop(0))
+        T1 = float(p.pop(0)) if opt_T1 else float(T1_fijo)
+        D_max_eff = float(p.pop(0)) if opt_DK else float(D_max_fijo)
+        k_sens_eff = float(p.pop(0)) if opt_DK else float(k_fijo)
+    except (ValueError, TypeError, IndexError):
+        return 1e15
+    if not (np.isfinite(P_base) and np.isfinite(T1) and np.isfinite(D_max_eff) and np.isfinite(k_sens_eff)):
+        return 1e15
+    if P_base <= 0 or T1 <= 1:
+        return 1e15
+    if D_max_eff <= 0.001 or D_max_eff >= 0.999 or k_sens_eff <= 0:
+        return 1e15
+
+    recurrentes_nuevos = []
+    for _, row in df_work.iterrows():
+        mclf = calc_mclf_cliente(row["# txn"], P_base, T1, D_max_eff, k_sens_eff)
+        mlf_psf = ILF_base_param * (pct_MLF + pct_PSF)
+        tot = max(MCB_piso, mclf + mlf_psf)
+        recurrentes_nuevos.append(tot)
+
+    recurrentes_nuevos = np.array(recurrentes_nuevos)
+    mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
+    if eval_mode == "Detalle Registros Filtrados":
+        recurrentes_mensual = recurrentes_nuevos.sum() / max(1, num_meses_disponibles)
+        rev_penalty = (target_rev_rec - recurrentes_mensual)**2
+    else:
+        rev_penalty = (target_rev_rec - recurrentes_nuevos.sum())**2
+    return mse + 5 * rev_penalty
+
+x0 = [500.0]
 if optimizar_T1:
-    def loss_recurrente(params):
-        P_base, T1 = params
-        if P_base <= 0 or T1 <= 1:
-            return 1e15
+    x0.append(1000.0)
+if optimizar_Dmax_K:
+    x0.append(D_max)
+    x0.append(k_sens)
 
-        recurrentes_nuevos = []
-        for _, row in df_work.iterrows():
-            mclf = calc_mclf_cliente(row["# txn"], P_base, T1, D_max, k_sens)
-            mlf_psf = ILF_base_param * (pct_MLF + pct_PSF)
-            tot = max(MCB_piso, mclf + mlf_psf)
-            recurrentes_nuevos.append(tot)
+res_rec = opt.minimize(
+    loss_recurrente, x0=x0, method='Nelder-Mead',
+    args=(optimizar_T1, T1_fijo_user, optimizar_Dmax_K, D_max, k_sens),
+    options={'xatol': 1e-2, 'fatol': 1e-4, 'maxiter': 1000, 'disp': False}
+)
 
-        recurrentes_nuevos = np.array(recurrentes_nuevos)
-        mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
-        if eval_mode == "Detalle Registros Filtrados":
-            recurrentes_mensual = recurrentes_nuevos.sum() / max(1, num_meses_disponibles)
-            rev_penalty = (target_rev_rec - recurrentes_mensual)**2
-        else:
-            rev_penalty = (target_rev_rec - recurrentes_nuevos.sum())**2
-        return mse + 5 * rev_penalty
-
-    res_rec = opt.minimize(loss_recurrente, x0=[500.0, 1000.0], method='Nelder-Mead')
-    P_base_MCLF_opt = max(10.0, res_rec.x[0])
-    T1_opt = max(10.0, res_rec.x[1])
+_xres = list(res_rec.x)
+P_base_MCLF_opt = max(10.0, float(_xres.pop(0)))
+if optimizar_T1:
+    T1_opt = max(10.0, float(_xres.pop(0)))
 else:
-    def loss_recurrente_fixed_t1(params):
-        P_base = params[0]
-        T1 = float(T1_fijo_user)
-        if P_base <= 0:
-            return 1e15
-
-        recurrentes_nuevos = []
-        for _, row in df_work.iterrows():
-            mclf = calc_mclf_cliente(row["# txn"], P_base, T1, D_max, k_sens)
-            mlf_psf = ILF_base_param * (pct_MLF + pct_PSF)
-            tot = max(MCB_piso, mclf + mlf_psf)
-            recurrentes_nuevos.append(tot)
-
-        recurrentes_nuevos = np.array(recurrentes_nuevos)
-        mse = np.mean((recurrentes_nuevos - df_work["valor cobrado"])**2)
-        if eval_mode == "Detalle Registros Filtrados":
-            recurrentes_mensual = recurrentes_nuevos.sum() / max(1, num_meses_disponibles)
-            rev_penalty = (target_rev_rec - recurrentes_mensual)**2
-        else:
-            rev_penalty = (target_rev_rec - recurrentes_nuevos.sum())**2
-        return mse + 5 * rev_penalty
-
-    res_rec = opt.minimize(loss_recurrente_fixed_t1, x0=[500.0], method='Nelder-Mead')
-    P_base_MCLF_opt = max(10.0, res_rec.x[0])
     T1_opt = float(T1_fijo_user)
+if optimizar_Dmax_K:
+    D_max = min(0.999, max(0.05, float(_xres.pop(0))))
+    k_sens = max(10.0, float(_xres.pop(0)))
 
 costo_bolsa_mclf = P_base_MCLF_opt * T1_opt
 
@@ -598,6 +610,8 @@ with tab_exec:
     df_res_rec_summary = pd.DataFrame([
         {"Parametro": "Tarifa Base Recurrente (P_base, MCLF)", "Valor": f"${P_base_MCLF_opt:,.2f} COP/txn"},
         {"Parametro": "Capacidad Base de Bolsa (T1)", "Valor": f"{T1_opt:,.0f} transacciones " + ("(Optimizado automáticamente)" if optimizar_T1 else "(Fijado comercialmente)")},
+        {"Parametro": "Descuento Maximo (D max)", "Valor": f"{D_max*100:.1f}% " + ("(Optimizado automáticamente)" if optimizar_Dmax_K else "(Fijado comercialmente)")},
+        {"Parametro": "Curvatura de Descuento (K)", "Valor": f"{k_sens:,.0f} txns " + ("(Optimizado automáticamente)" if optimizar_Dmax_K else "(Fijado comercialmente)")},
         {"Parametro": "Precio Fijo por Bolsa Recurrente", "Valor": f"${costo_bolsa_mclf:,.0f} COP"}
     ])
     st.markdown("#### Modelo Recurrente Mensual (MCLF + MCB)")
